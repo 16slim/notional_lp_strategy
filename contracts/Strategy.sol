@@ -405,7 +405,7 @@ contract Strategy is BaseStrategy {
         // Trade the shortest maturity market with at least minAmountToMaturity time left
         bytes32[] memory trades = new bytes32[](1);
         trades[0] = getTradeFrom(
-            0, 
+            2, 
             minMarketIndex, 
             uint256(fCashAmountToTrade)
             );
