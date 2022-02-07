@@ -4,21 +4,16 @@ import pytest
 # tests harvesting a strategy that returns profits correctly
 def test_profitable_harvest(
     chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
-    n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, million_in_token
+    n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, 
+    million_in_token, note_token
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
-    min_market_index = utils.get_min_market_index(strategy, currencyID, n_proxy_views)
-    amount_fcash = n_proxy_views.getfCashAmountGivenCashAmount(
-        strategy.currencyID(),
-        - amount / strategy.DECIMALS_DIFFERENCE() * MAX_BPS,
-        min_market_index,
-        chain.time()+5
-        )
     
     # Harvest 1: Send funds through the strategy
     chain.sleep(1)
     strategy.harvest({"from": strategist})
+    assert 0==1
 
     account = n_proxy_views.getAccount(strategy)
     next_settlement = account[0][0]

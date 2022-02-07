@@ -75,6 +75,10 @@ def n_proxy_account(n_proxy):
 def n_proxy_implementation(n_proxy):
     yield interface.NotionalProxy(n_proxy.address)
 
+@pytest.fixture
+def note_token(n_proxy_implementation):
+    yield Contract(n_proxy_implementation.getNoteToken())
+
 
 token_addresses = {
     "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",  # WBTC
@@ -89,10 +93,10 @@ token_addresses = {
 # TODO: uncomment those tokens you want to test as want
 @pytest.fixture(
     params=[
-        'WBTC', # WBTC
-        "WETH",  # WETH
+        # 'WBTC', # WBTC
+        # "WETH",  # WETH
         'DAI', # DAI
-        'USDC', # USDC
+        # 'USDC', # USDC
     ],
     scope="session",
     autouse=True,
@@ -206,7 +210,6 @@ def strategy(strategist, keeper, vault, rewards, Strategy, gov, notional_proxy, 
     strategy = strategist.deploy(Strategy, vault, notional_proxy, currencyID)
     strategy.setKeeper(keeper)
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
-    strategy.setMinTimeToMaturity(1 * 30 * 24 * 60 * 60, {"from": vault.governance()})
     yield strategy
 
 

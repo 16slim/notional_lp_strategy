@@ -45,6 +45,8 @@ contract Strategy is BaseStrategy {
 
     // NotionalContract: proxy that points to a router with different implementations depending on function 
     NotionalProxy public nProxy;
+    // NOTE token for rewards
+    IERC20 private noteToken;
     // ID of the asset being lent in Notional
     uint16 public currencyID; 
     // Difference of decimals between Notional system (8) and want
@@ -130,6 +132,9 @@ contract Strategy is BaseStrategy {
         
         // By default do not realize losses
         toggleRealizeLosses = false;
+
+        // Initialize NOTE token
+        noteToken = IERC20(nProxy.getNoteToken());
 
         // Check whether the currency is set up right
         if (_currencyID == 1) {
@@ -241,7 +246,7 @@ contract Strategy is BaseStrategy {
 
         return balanceOfWant()
             .add(_getTotalValueFromPortfolio())
-            // TODO: add value of NOTE rewards
+            .add(_getRewardsValue())
         ;
     }
 
@@ -334,12 +339,10 @@ contract Strategy is BaseStrategy {
             want.approve(address(nProxy), availableWantBalance);
         }
 
-        executeBalanceActionWithTrades(
+        executeBalanceAction(
             DepositActionType.DepositUnderlyingAndMintNToken,
             availableWantBalance,
-            0, 
-            true,
-            true
+            0
         );
 
     }
@@ -407,12 +410,10 @@ contract Strategy is BaseStrategy {
         // TODO: liquidate the proportional part of nTokens necessary
         
         // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
-        executeBalanceActionWithTrades(
+        executeBalanceAction(
             DepositActionType.RedeemNToken, 
             0,
-            0, 
-            true,
-            true
+            0
         );
 
         if (amountToLiquidate > 0) {
@@ -544,11 +545,11 @@ contract Strategy is BaseStrategy {
     function _getTotalValueFromPortfolio() public view returns(uint256 assetCashClaim) {
     }
 
-    function _getIncentivesValue() private view returns(uint256 incentivesValue) {
+    function _getRewardsValue() public view returns(uint256 incentivesValue) {
         // TODO: Complete, it should:
-        // - check strat's claimable incentives
         // - get trading rate from balancer
-
+        uint256 claimableRewards = nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+        incentivesValue = claimableRewards;
     }
 
     /*
@@ -606,7 +607,7 @@ contract Strategy is BaseStrategy {
         ) = nProxy.getCurrencyAndRates(currencyID);
 
         // TODO: Convert to underlying
-        totalUnderlyingClaim = totalAssetCashClaim;
+        totalUnderlyingClaim = totalAssetCashClaim * assetRate.rate / assetRate.underlyingDecimals;
     }
 
     // CALCS
@@ -655,31 +656,28 @@ contract Strategy is BaseStrategy {
      * @param redeemToUnderlying, whether to redeem asset cash to the underlying token on withdraw
      * @param trades, array of bytes32 trades to perform
      */
-    function executeBalanceActionWithTrades(
+    function executeBalanceAction(
         DepositActionType actionType,
         uint256 depositActionAmount,
-        uint256 withdrawAmountInternalPrecision,
-        bool withdrawEntireCashBalance,
-        bool redeemToUnderlying
+        uint256 withdrawAmountInternalPrecision
         ) internal {
-        BalanceActionWithTrades[] memory actions = new BalanceActionWithTrades[](1);
+        BalanceAction[] memory actions = new BalanceAction[](1);
         // gas savings
         uint16 _currencyID = currencyID;
-        actions[0] = BalanceActionWithTrades(
+        actions[0] = BalanceAction(
             actionType,
             _currencyID,
             depositActionAmount,
-            withdrawAmountInternalPrecision, 
-            withdrawEntireCashBalance,
-            redeemToUnderlying,
-            new bytes32[](1)
+            withdrawAmountInternalPrecision,
+            true, 
+            true
         );
 
         if (_currencyID == 1) {
-            nProxy.batchBalanceAndTradeAction{value: depositActionAmount}(address(this), actions);
+            nProxy.batchBalanceAction{value: depositActionAmount}(address(this), actions);
             weth.deposit{value: address(this).balance}();
         } else {
-            nProxy.batchBalanceAndTradeAction(address(this), actions);
+            nProxy.batchBalanceAction(address(this), actions);
         }
     }
 
