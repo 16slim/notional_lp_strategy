@@ -300,7 +300,7 @@ contract Strategy is BaseStrategy {
 
     function _claimRewards() public {
         uint256 _incentives = nProxy.nTokenClaimIncentives();
-        emit numbers("_incentives", _incentives);
+
         if (_incentives > 0) {
             want.approve(address(balancerVault), MAX_UINT);
             noteToken.approve(address(balancerVault), MAX_UINT);
@@ -340,11 +340,10 @@ contract Strategy is BaseStrategy {
             uint256 _debtPayment
         )
     {   
-        emit numbers("_debtOutstanding", _debtOutstanding);
         _claimRewards();
         // We only need profit for decision making
         (_profit, ) = getUnrealisedPL();
-        emit numbers("_profit", _profit);
+
         // free funds to repay debt + profit to the strategy
         uint256 wantBalance = balanceOfWant();
         
@@ -385,7 +384,7 @@ contract Strategy is BaseStrategy {
             _debtPayment = _debtOutstanding;
         }
     }
-    event numbers(string s, uint256 n);
+
     /*
      * @notice
      * Function re-allocating the available funds (present in the strategy's balance in the 'want' token)
@@ -484,7 +483,6 @@ contract Strategy is BaseStrategy {
             .div(_getNTokenTotalValueFromPortfolio()
                 .sub(wantBalance)
                 );
-        emit numbers("tokensToRedeem", tokensToRedeem);
         
         // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
         // TODO: handle the 24h protection period after market roll to avoid reverting due to
