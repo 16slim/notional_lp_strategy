@@ -300,7 +300,7 @@ contract Strategy is BaseStrategy {
 
     function _claimRewards() public {
         uint256 _incentives = nProxy.nTokenClaimIncentives();
-
+        emit numbers("_incentives", _incentives);
         if (_incentives > 0) {
             want.approve(address(balancerVault), MAX_UINT);
             noteToken.approve(address(balancerVault), MAX_UINT);
@@ -340,9 +340,11 @@ contract Strategy is BaseStrategy {
             uint256 _debtPayment
         )
     {   
+        emit numbers("_debtOutstanding", _debtOutstanding);
         _claimRewards();
         // We only need profit for decision making
         (_profit, ) = getUnrealisedPL();
+        emit numbers("_profit", _profit);
         // free funds to repay debt + profit to the strategy
         uint256 wantBalance = balanceOfWant();
         
@@ -383,7 +385,7 @@ contract Strategy is BaseStrategy {
             _debtPayment = _debtOutstanding;
         }
     }
-
+    event numbers(string s, uint256 n);
     /*
      * @notice
      * Function re-allocating the available funds (present in the strategy's balance in the 'want' token)
@@ -478,12 +480,15 @@ contract Strategy is BaseStrategy {
         // NOTE: We do not use estimatedTotalAssets as it includes the valiue of the rewards
         //instead we ue the internal function calculating the value of the nToken position
         uint256 tokensToRedeem = amountToLiquidate
-            .mul(nToken.nTokenBalanceOf(_currencyID, address(this)))
+            .mul(nProxy.nTokenBalanceOf(_currencyID, address(this)))
             .div(_getNTokenTotalValueFromPortfolio()
                 .sub(wantBalance)
                 );
+        emit numbers("tokensToRedeem", tokensToRedeem);
         
         // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
+        // TODO: handle the 24h protection period after market roll to avoid reverting due to
+        // idiosyncratic cash, create another toggle to force exit out of ths position
         executeBalanceAction(
             DepositActionType.RedeemNToken, 
             tokensToRedeem,
@@ -765,7 +770,11 @@ contract Strategy is BaseStrategy {
         );
 
         if (_currencyID == 1) {
-            nProxy.batchBalanceAction{value: depositActionAmount}(address(this), actions);
+            if (actionType == DepositActionType.DepositUnderlyingAndMintNToken) {
+                nProxy.batchBalanceAction{value: depositActionAmount}(address(this), actions);
+            } else if (actionType == DepositActionType.RedeemNToken) {
+                nProxy.batchBalanceAction(address(this), actions);
+            }
             weth.deposit{value: address(this).balance}();
         } else {
             nProxy.batchBalanceAction(address(this), actions);
