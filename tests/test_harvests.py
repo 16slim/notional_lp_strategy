@@ -13,7 +13,8 @@ def test_profitable_harvest(
     # Harvest 1: Send funds through the strategy
     chain.sleep(1)
     strategy.harvest({"from": strategist})
-    assert 0==1
+
+    assert 0
 
     account = n_proxy_views.getAccount(strategy)
     next_settlement = account[0][0]

@@ -79,6 +79,14 @@ def n_proxy_implementation(n_proxy):
 def note_token(n_proxy_implementation):
     yield Contract(n_proxy_implementation.getNoteToken())
 
+@pytest.fixture
+def balancer_vault():
+    yield Contract("0xBA12222222228d8Ba445958a75a0704d566BF2C8")
+
+@pytest.fixture
+def balancer_note_weth_pool():
+    yield "0x5f7fa48d765053f8dd85e052843e12d23e3d7bc50002000000000000000000c0"
+
 
 token_addresses = {
     "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",  # WBTC
@@ -94,8 +102,8 @@ token_addresses = {
 @pytest.fixture(
     params=[
         # 'WBTC', # WBTC
-        # "WETH",  # WETH
-        'DAI', # DAI
+        "WETH",  # WETH
+        # 'DAI', # DAI
         # 'USDC', # USDC
     ],
     scope="session",
@@ -187,7 +195,7 @@ def weth_amount(user, weth):
 def vault(pm, gov, rewards, guardian, management, token):
     Vault = pm(config["dependencies"][0]).Vault
     vault = guardian.deploy(Vault)
-    vault.initialize(token, gov, rewards, "", "", guardian, management)
+    vault.initialize(token, gov, rewards, "", "", guardian, management, {"from": guardian})
     vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
     vault.setManagement(management, {"from": gov})
     vault.setManagementFee(0, {"from": gov})
@@ -206,8 +214,10 @@ def live_vault(registry, token):
 
 
 @pytest.fixture
-def strategy(strategist, keeper, vault, rewards, Strategy, gov, notional_proxy, currencyID):
-    strategy = strategist.deploy(Strategy, vault, notional_proxy, currencyID)
+def strategy(strategist, keeper, vault, rewards, Strategy, gov, \
+    notional_proxy, currencyID, balancer_vault, balancer_note_weth_pool):
+    strategy = strategist.deploy(Strategy, vault, notional_proxy, \
+        currencyID, balancer_vault.address, balancer_note_weth_pool)
     strategy.setKeeper(keeper)
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
     yield strategy
