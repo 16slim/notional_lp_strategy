@@ -1,3 +1,4 @@
+from datetime import timedelta
 from utils import actions, checks, utils
 import pytest
 
@@ -14,78 +15,45 @@ def test_profitable_harvest(
     chain.sleep(1)
     strategy.harvest({"from": strategist})
 
-    assert 0
+    amount_invested = vault.strategies(strategy)["totalDebt"]
 
     account = n_proxy_views.getAccount(strategy)
-    next_settlement = account[0][0]
+    amount_tokens = account[1][0][2]
 
-    assert pytest.approx(account[2][0][3], rel=RELATIVE_APPROX) == amount_fcash
+    assert amount_tokens > 0
+    assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == vault.strategies(strategy)["totalDebt"]
 
-    position_cash = n_proxy_views.getCashAmountGivenfCashAmount(
-        strategy.currencyID(),
-        - amount_fcash,
-        min_market_index,
-        chain.time()+1
-        )[1] * strategy.DECIMALS_DIFFERENCE() / MAX_BPS
-    total_assets = strategy.estimatedTotalAssets()
+    active_markets = n_proxy_views.getActiveMarkets(currencyID)
+    first_settlement = active_markets[0][1]
+
+    chain.mine(1, timedelta=int((first_settlement-chain.time()) / 3))
+    assert strategy.estimatedTotalAssets() > amount_invested
+    tx = strategy.harvest({"from": strategist})
     
-    assert pytest.approx(total_assets, rel=RELATIVE_APPROX) == position_cash
+    assert tx.events["Harvested"]["profit"] > 0
+    assert tx.events["Harvested"]["loss"] == 0
+    assert tx.events["Harvested"]["debtPayment"] == 0
+
+    chain.mine(1, timedelta=int((first_settlement-chain.time()) / 3))
+
+    tx = strategy.harvest({"from": strategist})
     
-    # Add some code before harvest #2 to simulate earning yield
-    actions.wait_until_settlement(next_settlement)
+    assert tx.events["Harvested"]["profit"] > 0
+    assert tx.events["Harvested"]["loss"] == 0
+    assert tx.events["Harvested"]["debtPayment"] == 0
+
+    chain.mine(1, timestamp=first_settlement)
     checks.check_active_markets(n_proxy_views, currencyID, n_proxy_implementation, user)
-
-    position_cash = n_proxy_views.getCashAmountGivenfCashAmount(
-        strategy.currencyID(),
-        - amount_fcash,
-        1,
-        chain.time()+1
-        )[1] * strategy.DECIMALS_DIFFERENCE() / MAX_BPS
-
-    # check that estimatedTotalAssets estimates correctly
-    assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == position_cash
-    assert position_cash > amount
-    profit_amount = 0
-    loss_amount = 0
 
     before_pps = vault.pricePerShare()
     print("Vault assets 1: ", vault.totalAssets())
-    # Harvest 2: Harvest with unrealized and non-mature profits: should not change anything 
-    chain.sleep(1)
     
-    tx = strategy.harvest({"from": strategist})
-    
-    checks.check_harvest_profit(tx, profit_amount, RELATIVE_APPROX)
-    checks.check_harvest_loss(tx, loss_amount, RELATIVE_APPROX)
-
-    # Update debt ratio to force liqudating positions
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-
-    # Harvest 3: Remove funds to pay the debt's vault - should remove a total of 'amount' between token and reported 
-    # loss
-    strategy.setToggleRealizeLosses(True, {"from":gov})
+    strategy.setToggleLiquidatePosition(True, {"from": vault.governance()})
+    
     tx2 = strategy.harvest()
 
     account = n_proxy_views.getAccount(strategy)
-
-    assert amount == (tx2.events["Harvested"]["loss"] + token.balanceOf(vault))
-    assert (token.balanceOf(vault) + account[2][0][3] * strategy.DECIMALS_DIFFERENCE() / MAX_BPS) > amount
-    
-
-    # Harvest 3: wait until maturity to settle and withdraw profits
-    actions.initialize_intermediary_markets(n_proxy_views, currencyID, n_proxy_implementation, user, 
-        account[0][0], n_proxy_batch, token, token_whale, n_proxy_account, million_in_token)
-    chain.sleep(account[0][0] - chain.time() + 1)
-    chain.mine(1)
-    checks.check_active_markets(n_proxy_views, currencyID, n_proxy_implementation, user)
-
-    account = n_proxy_views.getAccount(strategy)
-    
-    tx3 = strategy.harvest()
-    if currencyID == 4:
-        assert pytest.approx(tx3.events["Harvested"]["profit"], rel=RELATIVE_APPROX) == account[2][0][3] * strategy.DECIMALS_DIFFERENCE() / MAX_BPS
-    else:
-        assert tx3.events["Harvested"]["profit"] >= account[2][0][3] * strategy.DECIMALS_DIFFERENCE() / MAX_BPS
     
     chain.sleep(3600 * 6)  # 6 hrs needed for profits to unlock
     chain.mine(1)

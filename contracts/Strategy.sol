@@ -63,8 +63,8 @@ contract Strategy is BaseStrategy {
     IWETH public constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // Constant necessary to accept ERC1155 fcash tokens (for migration purposes) 
     bytes4 internal constant ERC1155_ACCEPTED = bytes4(keccak256("onERC1155Received(address,address,uint256,uint256,bytes)"));
-    // To control when positions should be liquidated before maturity or not (and thus incur in losses)
-    bool internal toggleRealizeLosses;
+    // To control when positions should be liquidated 
+    bool internal toggleLiquidatePosition;
     // Base for percentage calculations. BPS (10000 = 100%, 100 = 1%)
     uint256 private constant MAX_BPS = 10_000;
     // Time constants
@@ -150,7 +150,7 @@ contract Strategy is BaseStrategy {
         DECIMALS_DIFFERENCE = uint256(underlying.decimals).mul(MAX_BPS).div(uint256(assetToken.decimals));
         
         // By default do not realize losses
-        toggleRealizeLosses = false;
+        toggleLiquidatePosition = false;
 
         // Initialize NOTE token and nToken
         noteToken = IERC20(nProxy.getNoteToken());
@@ -241,8 +241,8 @@ contract Strategy is BaseStrategy {
      *  Getter function for the toggle defining whether to realize losses or not
      * @return bool, current toggleRealizeLosses state variable
      */
-    function getToggleRealizeLosses() external view returns(bool) {
-        return toggleRealizeLosses;
+    function getToggleLiquidatePosition() external view returns(bool) {
+        return toggleLiquidatePosition;
     }
 
     /*
@@ -251,8 +251,8 @@ contract Strategy is BaseStrategy {
      * only accessible to strategist, governance, guardian and management
      * @param _newToggle, new booelan value for the toggle
      */
-    function setToggleRealizeLosses(bool _newToggle) external onlyEmergencyAuthorized {
-        toggleRealizeLosses = _newToggle;
+    function setToggleLiquidatePosition(bool _newToggle) external onlyEmergencyAuthorized {
+        toggleLiquidatePosition = _newToggle;
     }
 
     /*
@@ -331,6 +331,16 @@ contract Strategy is BaseStrategy {
      * @return _loss, the amount of losses the strategy may have produced until now
      * @return _debtPayment, the amount the strategy has been able to pay back to the vault
      */
+    function prepGov(uint256 _debtOutstanding)
+        external
+        returns (
+            uint256 _profit,
+            uint256 _loss,
+            uint256 _debtPayment
+        )
+    {
+        prepareReturn(_debtOutstanding);
+    }
     function prepareReturn(uint256 _debtOutstanding)
         internal
         override
@@ -357,7 +367,7 @@ contract Strategy is BaseStrategy {
 
             // If the toggle to realize losses is off, do not close any position
             // TODO: Add toggle for profits too
-            if(toggleRealizeLosses) {
+            if(toggleLiquidatePosition) {
                 (amountAvailable, _loss) = liquidatePosition(amountRequired);
             }
             
@@ -470,7 +480,9 @@ contract Strategy is BaseStrategy {
         // Due to how Notional works, we need to substract losses from the amount to liquidate
         // If we don't do this and withdraw a small enough % of position, we will not incur in losses,
         // leaving them for the future withdrawals (which is bad! those who withdraw should take the losses)
+        
         amountToLiquidate = amountToLiquidate.sub(lossesToBeRealised);
+        
         // Minor gas savings
         uint16 _currencyID = currencyID;
         // Liquidate the proportional part of nTokens necessary
@@ -481,8 +493,8 @@ contract Strategy is BaseStrategy {
         uint256 tokensToRedeem = amountToLiquidate
             .mul(nProxy.nTokenBalanceOf(_currencyID, address(this)))
             .div(_getNTokenTotalValueFromPortfolio()
-                .sub(wantBalance)
                 );
+        
         
         // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
         // TODO: handle the 24h protection period after market roll to avoid reverting due to
@@ -505,7 +517,21 @@ contract Strategy is BaseStrategy {
         }
 
         // Re-set the toggle to false
-        toggleRealizeLosses = false;
+        toggleLiquidatePosition = false;
+    }
+    
+    /*
+     * @notice
+     *  External function used in emergency to redeem a specific amount of tokens manually
+     * @param amountToRedeem number of tokens to redeem
+     * @return uint256 amountLiquidated, the total amount liquidated
+     */
+    function redeemNTokenAmount(uint256 amountToRedeem) external onlyVaultManagers {
+        executeBalanceAction(
+                    DepositActionType.RedeemNToken, 
+                    amountToRedeem,
+                    0
+                );
     }
 
     /*
@@ -514,10 +540,17 @@ contract Strategy is BaseStrategy {
      * @return uint256 amountLiquidated, the total amount liquidated
      */
     function liquidateAllPositions() internal override returns (uint256) {
-        
-        (uint256 amountLiquidated, ) = liquidatePosition(estimatedTotalAssets());
+        if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
+            _claimRewards();
+        }
+        uint256 nTokenBalance = nProxy.nTokenBalanceOf(currencyID, address(this));
+        executeBalanceAction(
+                    DepositActionType.RedeemNToken, 
+                    nTokenBalance,
+                    0
+                );
 
-        return amountLiquidated;
+        return balanceOfWant();
     }
     
     /*
@@ -526,9 +559,17 @@ contract Strategy is BaseStrategy {
      * @param _newStrategy address where the contract of the new strategy is located
      */
     function prepareMigration(address _newStrategy) internal override {
-        
+        if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
+            _claimRewards();
+        }
         // Transfer nTokens and NOTE incentives (may be necessary to claim them)
-        
+        uint256 nTokenBalance = nProxy.nTokenBalanceOf(currencyID, address(this));
+        nProxy.nTokenTransfer(
+            currencyID, 
+            address(this), 
+            _newStrategy, 
+            nTokenBalance
+            );
     }
 
     /*
