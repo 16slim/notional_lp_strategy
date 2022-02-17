@@ -11,6 +11,7 @@ import "../interfaces/IWETH.sol";
 import "../interfaces/balancer/BalancerV2.sol";
 import "../interfaces/notional/nTokenERC20.sol";
 
+import "../libraries/NotionalLpLib.sol";
 
 // These are the core Yearn libraries
 import {
@@ -58,13 +59,15 @@ contract Strategy is BaseStrategy {
     // Difference of decimals between Notional system (8) and want
     uint256 public DECIMALS_DIFFERENCE;
     // minimum amount of want to act on
-    uint16 public minAmountWant;
+    uint256 public minAmountWant;
     // Initialize WETH interface
     IWETH public constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // Constant necessary to accept ERC1155 fcash tokens (for migration purposes) 
     bytes4 internal constant ERC1155_ACCEPTED = bytes4(keccak256("onERC1155Received(address,address,uint256,uint256,bytes)"));
     // To control when positions should be liquidated 
     bool internal toggleLiquidatePosition;
+    // To control when rewards are claimed 
+    bool internal toggleClaimRewards;
     // Base for percentage calculations. BPS (10000 = 100%, 100 = 1%)
     uint256 private constant MAX_BPS = 10_000;
     // Time constants
@@ -168,6 +171,10 @@ contract Strategy is BaseStrategy {
         poolId = _poolId;
         (address balancerPoolAddress,) = balancerVault.getPool(_poolId);
         balancerPool = IBalancerPool(balancerPoolAddress);
+
+        // Approve movements from balancerVault
+        want.approve(address(balancerVault), MAX_UINT);
+        noteToken.approve(address(balancerVault), MAX_UINT);
     }
 
     /*
@@ -260,7 +267,7 @@ contract Strategy is BaseStrategy {
      *  Setter function for the minimum amount of want to invest, accesible only to strategist, governance, guardian and management
      * @param _newMinAmount, new minimum amount of want to invest
      */
-    function setMinAmountWant(uint16 _newMinAmount) external onlyEmergencyAuthorized {
+    function setMinAmountWant(uint256 _newMinAmount) external onlyEmergencyAuthorized {
         minAmountWant = _newMinAmount;
     }
 
@@ -272,8 +279,14 @@ contract Strategy is BaseStrategy {
         return address(balancerPool);
     }
 
-    function setBalancerVault(address _newVault) external onlyVaultManagers {
+    function setBalancerVault(address _newVault) external onlyGovernance {
+        // want.approve(address(balancerVault), 0);
+        // noteToken.approve(address(balancerVault), 0);
+        
         balancerVault = IBalancerVault(_newVault);
+
+        // want.approve(_newVault, MAX_UINT);
+        // noteToken.approve(_newVault, MAX_UINT);
     }
 
     function setBalancerPool(bytes32 _newPoolId) external onlyVaultManagers {
@@ -302,8 +315,6 @@ contract Strategy is BaseStrategy {
         uint256 _incentives = nProxy.nTokenClaimIncentives();
 
         if (_incentives > 0) {
-            want.approve(address(balancerVault), MAX_UINT);
-            noteToken.approve(address(balancerVault), MAX_UINT);
             IBalancerVault.SingleSwap memory swap = IBalancerVault.SingleSwap(
                 poolId,
                 IBalancerVault.SwapKind.GIVEN_IN,
@@ -366,7 +377,6 @@ contract Strategy is BaseStrategy {
             uint256 amountAvailable = wantBalance;
 
             // If the toggle to realize losses is off, do not close any position
-            // TODO: Add toggle for profits too
             if(toggleLiquidatePosition) {
                 (amountAvailable, _loss) = liquidatePosition(amountRequired);
             }
@@ -457,6 +467,7 @@ contract Strategy is BaseStrategy {
      * @return uint256 _liquidatedAmount, Amount freed
      * @return uint256 _loss, Losses incurred due to early closing of positions
      */
+    event n(string s, uint256 n);
     function liquidatePosition(uint256 _amountNeeded)
         internal
         override
@@ -467,33 +478,39 @@ contract Strategy is BaseStrategy {
         if (wantBalance >= _amountNeeded) {
             return (_amountNeeded, 0);
         }
-
+        emit n("_amountNeeded", _amountNeeded);
         // Get current position's P&L
         (, uint256 unrealisedLosses) = getUnrealisedPL();
+        emit n("unrealisedLosses", unrealisedLosses);
         // We only need to withdraw what we don't currently have in want
         uint256 amountToLiquidate = _amountNeeded.sub(wantBalance);
+        emit n("wantBalance", wantBalance);
+        emit n("amountToLiquidate", amountToLiquidate);
         
         // The strategy will only realise losses proportional to the amount we are liquidating
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
         uint256 lossesToBeRealised = unrealisedLosses.mul(amountToLiquidate).div(totalDebt.sub(wantBalance));
+        emit n("lossesToBeRealised", lossesToBeRealised);
 
         // Due to how Notional works, we need to substract losses from the amount to liquidate
         // If we don't do this and withdraw a small enough % of position, we will not incur in losses,
         // leaving them for the future withdrawals (which is bad! those who withdraw should take the losses)
         
         amountToLiquidate = amountToLiquidate.sub(lossesToBeRealised);
+        emit n("amountToLiquidate", amountToLiquidate);
         
         // Minor gas savings
         uint16 _currencyID = currencyID;
         // Liquidate the proportional part of nTokens necessary
-        // We calcualte the number of tokens to redeem by calculating the % of assets to 
+        // We calculate the number of tokens to redeem by calculating the % of assets to 
         // liquidate and applying that % to the # of nTokens held
-        // NOTE: We do not use estimatedTotalAssets as it includes the valiue of the rewards
-        //instead we ue the internal function calculating the value of the nToken position
+        // NOTE: We do not use estimatedTotalAssets as it includes the value of the rewards
+        // instead we use the internal function calculating the value of the nToken position
         uint256 tokensToRedeem = amountToLiquidate
             .mul(nProxy.nTokenBalanceOf(_currencyID, address(this)))
             .div(_getNTokenTotalValueFromPortfolio()
                 );
+        emit n("tokensToRedeem", tokensToRedeem);
         
         
         // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
@@ -507,10 +524,12 @@ contract Strategy is BaseStrategy {
 
         // Assess result 
         uint256 totalAssets = balanceOfWant();
+        emit n("totalAssets", totalAssets);
         if (_amountNeeded > totalAssets) {
             _liquidatedAmount = totalAssets;
             // _loss should be equal to lossesToBeRealised ! 
             _loss = _amountNeeded.sub(totalAssets);
+            emit n("_loss", _loss);
             
         } else {
             _liquidatedAmount = totalAssets;
@@ -540,7 +559,8 @@ contract Strategy is BaseStrategy {
      * @return uint256 amountLiquidated, the total amount liquidated
      */
     function liquidateAllPositions() internal override returns (uint256) {
-        if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
+        if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0 && 
+            toggleClaimRewards) {
             _claimRewards();
         }
         uint256 nTokenBalance = nProxy.nTokenBalanceOf(currencyID, address(this));
@@ -559,7 +579,8 @@ contract Strategy is BaseStrategy {
      * @param _newStrategy address where the contract of the new strategy is located
      */
     function prepareMigration(address _newStrategy) internal override {
-        if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
+        if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0 && 
+            toggleClaimRewards) {
             _claimRewards();
         }
         // Transfer nTokens and NOTE incentives (may be necessary to claim them)
@@ -693,56 +714,16 @@ contract Strategy is BaseStrategy {
      */
      // TODO: Explain this calculation and ask jeff to review it
     function _getNTokenTotalValueFromPortfolio() public view returns(uint256 totalUnderlyingClaim) {
-        address nTokenAddress = address(nToken);    
-        (, int256 nTokenBalance, ) = nProxy.getAccountBalance(currencyID, address(this));
+        address nTokenAddress = address(nToken);
 
-        if (nTokenBalance > 0) {
-            (PortfolioAsset[] memory liquidityTokens, PortfolioAsset[] memory netfCashAssets) = nProxy.getNTokenPortfolio(nTokenAddress);
-            MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
-            // TODO: Implement _checkIdiosyncratic(_activeMarkets, netfCashAssets);
-            int256 totalSupply = int256(nProxy.nTokenTotalSupply(nTokenAddress));
-            int256 MAX_BPS_INT = int256(MAX_BPS);
-
-            // Iterate over all active markets and sum value of each position 
-            int256 fCashClaim = 0;
-            int256 assetCashClaim = 0;
-            int256 totalAssetCashClaim = 0;
-            
-            for(uint256 i = 0; i < liquidityTokens.length; i++) {
-                // Gas savings
-                PortfolioAsset memory liquidityToken_i = liquidityTokens[i];
-                MarketParameters memory activeMarket_i = _activeMarkets[i];
-
-                fCashClaim = liquidityToken_i.notional * MAX_BPS_INT * activeMarket_i.totalfCash / activeMarket_i.totalLiquidity;
-                assetCashClaim = liquidityToken_i.notional * MAX_BPS_INT * activeMarket_i.totalAssetCash / activeMarket_i.totalLiquidity;
-                fCashClaim += netfCashAssets[i].notional * MAX_BPS_INT;
-
-                fCashClaim = fCashClaim * MAX_BPS_INT * nTokenBalance / totalSupply;
-                assetCashClaim = assetCashClaim * MAX_BPS_INT * nTokenBalance / totalSupply;
-
-                if (fCashClaim > 0) {
-                    uint256 mIndex = _getMarketIndexForMaturity(liquidityToken_i.maturity);
-                    (int256 assetInternalNotation,) = nProxy.getCashAmountGivenfCashAmount(
-                        currencyID,
-                        int88(-fCashClaim / MAX_BPS_INT / MAX_BPS_INT),
-                        mIndex,
-                        block.timestamp
-                    );
-                    assetCashClaim += assetInternalNotation * MAX_BPS_INT * MAX_BPS_INT;
-                }
-                totalAssetCashClaim += assetCashClaim;
-            }
-            totalAssetCashClaim = totalAssetCashClaim / MAX_BPS_INT / MAX_BPS_INT;
-
-            (
-                Token memory assetToken,
-                Token memory underlyingToken,
-                ,
-                AssetRateParameters memory assetRate
-            ) = nProxy.getCurrencyAndRates(currencyID);
-
-            totalUnderlyingClaim = uint256(totalAssetCashClaim * assetRate.rate / assetRate.underlyingDecimals);
-        }
+        return NotionalLpLib.getNTokenTotalValueFromPortfolio(
+            NotionalLpLib.NTokenTotalValueFromPortfolioVars(
+                address(this), 
+                nTokenAddress,
+                nProxy,
+                currencyID
+            )
+            );
     }
 
     // CALCS
@@ -765,17 +746,7 @@ contract Strategy is BaseStrategy {
     function _getMarketIndexForMaturity(
         uint256 _maturity
     ) internal view returns(uint256) {
-        MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
-        bool success = false;
-        for(uint256 j=0; j<_activeMarkets.length; j++){
-            if(_maturity == _activeMarkets[j].maturity) {
-                return j+1;
-            }
-        }
-        
-        if (success == false) {
-            return 0;
-        }
+        return NotionalLpLib.getMarketIndexForMaturity(nProxy, currencyID, _maturity);
     }
 
     // NOTIONAL FUNCTIONS
