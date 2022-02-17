@@ -26,6 +26,33 @@ def wait_half_until_settlement(next_settlement):
     chain.mine(1)
     return
 
+def wait_n_days(days):
+    chain.mine(1, timedelta= 86_400 * days)
+
+def borrow_1m_whales(n_proxy_views, currencyID, token, n_proxy_batch, whale, million_fcash_notation):
+    million = utils.utils.million_in_token(token)
+    token.approve(n_proxy_views.address, 2 * million, {"from":whale})
+    n_proxy_batch.batchBalanceAndTradeAction(whale, \
+            [(2, utils.utils.get_currency_id(token), 2 * million, 0, 0, 1,\
+                [])], \
+                    {"from": whale,\
+                        })
+    fcash_position = -n_proxy_views.getfCashAmountGivenCashAmount(
+        currencyID,
+        million_fcash_notation,
+        1,
+        chain.time()+1
+    )
+    trade = encode_abi_packed(
+            ["uint8", "uint8", "uint88", "uint32", "uint120"], 
+            [1, 1, fcash_position, 0, 0]
+        )
+    n_proxy_batch.batchBalanceAndTradeAction(whale, \
+        [(0, currencyID, 0, 0, 1, 1,\
+            [trade])], \
+                {"from": whale,\
+                     "value":0})
+    
 
 def whale_drop_rates(n_proxy_batch, whale, token, n_proxy_views, currencyID, balance_threshold, market_index):
 
@@ -64,7 +91,7 @@ def whale_exit(n_proxy_batch, whale, n_proxy_views, currencyID, market_index):
     fcash_position = n_proxy_views.getAccount(whale)[2][0][3]
     trade = encode_abi_packed(
             ["uint8", "uint8", "uint88", "uint32", "uint120"], 
-            [1, 1, fcash_position, 0, 0]
+            [1, market_index, fcash_position, 0, 0]
         )
     n_proxy_batch.batchBalanceAndTradeAction(whale, \
         [(0, currencyID, 0, 0, 1, 1,\

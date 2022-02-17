@@ -1,5 +1,6 @@
+from os import curdir
 import brownie
-from brownie import interface, chain
+from brownie import interface, chain, Contract, accounts
 
 
 def vault_status(vault):
@@ -39,3 +40,42 @@ def get_min_market_index(strategy, currencyID, n_proxy_views):
     for i, am in enumerate(active_markets):
         if am[1] - chain.time() >= min_time:
             return i+1
+
+def million_in_token(token):
+    token_prices = {
+    "WBTC": 35_000,
+    "WETH": 2_000,
+    "LINK": 20,
+    "YFI": 30_000,
+    "USDT": 1,
+    "USDC": 1,
+    "DAI": 1,
+    }
+    return round(1e6 / token_prices[token.symbol()]) * 10 ** token.decimals()
+
+def get_currency_id(token):
+    currency_IDs = {
+        "WETH": 1,
+        "DAI": 2,  # DAI
+        "USDC": 3,  # USDC
+        "WBTC": 4
+    }
+    return currency_IDs[token.symbol()]
+
+def get_token(symbol):
+    token_addresses = {
+        "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",  # WBTC
+        "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # WETH
+        "DAI": "0x6B175474E89094C44Da98b954EedeAC495271d0F",  # DAI
+        "USDC": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",  # USDC
+    }
+    return Contract(token_addresses[symbol])
+
+def get_token_whale(symbol):
+    whale_addresses = {
+        "WBTC": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "WETH": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "USDC": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",
+        "DAI": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",
+    }
+    return accounts.at(whale_addresses[symbol], force=True)

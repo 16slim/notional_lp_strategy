@@ -138,13 +138,13 @@ def currencyID(token):
 whale_addresses = {
     "WBTC": "0x28c6c06298d514db089934071355e5743bf21d60",
     "WETH": "0x28c6c06298d514db089934071355e5743bf21d60",
-    "LINK": "0x28c6c06298d514db089934071355e5743bf21d60",
-    "YFI": "0x28c6c06298d514db089934071355e5743bf21d60",
-    "USDT": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",
     "USDC": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",
     "DAI": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",
 }
 
+@pytest.fixture
+def token_whales():
+    yield whale_addresses
 
 @pytest.fixture(scope="session", autouse=True)
 def token_whale(token):
@@ -153,7 +153,7 @@ def token_whale(token):
 
 token_prices = {
     "WBTC": 35_000,
-    "WETH": 2_000,
+    "WETH": 3_000,
     "LINK": 20,
     "YFI": 30_000,
     "USDT": 1,
@@ -177,6 +177,10 @@ def amount(token, token_whale, user):
 @pytest.fixture(autouse=True)
 def million_in_token(token):
     yield round(1e6 / token_prices[token.symbol()]) * 10 ** token.decimals()
+
+@pytest.fixture(autouse=True)
+def million_fcash_notation(million_in_token, token):
+    yield million_in_token / (10 ** token.decimals()) * (10 ** 8)
 
 @pytest.fixture
 def weth():
@@ -215,7 +219,8 @@ def live_vault(registry, token):
 
 @pytest.fixture
 def strategy(strategist, keeper, vault, rewards, Strategy, gov, \
-    notional_proxy, currencyID, balancer_vault, balancer_note_weth_pool):
+    notional_proxy, currencyID, balancer_vault, balancer_note_weth_pool, NotionalLpLib):
+    notional_lp_lib = strategist.deploy(NotionalLpLib)
     strategy = strategist.deploy(Strategy, vault, notional_proxy, \
         currencyID, balancer_vault.address, balancer_note_weth_pool)
     strategy.setKeeper(keeper)
@@ -253,7 +258,7 @@ def withdraw_no_losses(vault, token, amount, user):
 
 @pytest.fixture(scope="session", autouse=True)
 def RELATIVE_APPROX():
-    yield 1e-3
+    yield 5e-3
 
 @pytest.fixture(scope="session", autouse=True)
 def MAX_BPS():
