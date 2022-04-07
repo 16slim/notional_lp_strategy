@@ -10,6 +10,7 @@ import "../interfaces/notional/NotionalProxy.sol";
 import "../interfaces/IWETH.sol";
 import "../interfaces/balancer/BalancerV2.sol";
 import "../interfaces/notional/nTokenERC20.sol";
+import "../interfaces/sushi/ISushiRouter.sol";
 
 import "../libraries/NotionalLpLib.sol";
 
@@ -60,6 +61,7 @@ contract Strategy is BaseStrategy {
     uint256 public DECIMALS_DIFFERENCE;
     // minimum amount of want to act on
     uint256 public minAmountWant;
+    uint8 private unused = 1;
     // Initialize WETH interface
     IWETH public constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // Constant necessary to accept ERC1155 fcash tokens (for migration purposes) 
@@ -319,7 +321,7 @@ contract Strategy is BaseStrategy {
                 poolId,
                 IBalancerVault.SwapKind.GIVEN_IN,
                 IAsset(address(noteToken)),
-                IAsset(address(want)),
+                IAsset(address(weth)),
                 _incentives,
                 abi.encode(0)
             );
@@ -330,6 +332,22 @@ contract Strategy is BaseStrategy {
                 _incentives, 
                 now+10
                 );
+            
+            if (currencyID > 1) {
+                ISushiRouter router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+                IERC20(address(weth)).safeApprove(address(router), weth.balanceOf(address(this)));
+                address[] memory path = new address[](2);
+                path[0] = address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+                path[1] = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
+                router.swapExactTokensForTokens(
+                    weth.balanceOf(address(this)),
+                    0,
+                    path,
+                    address(this),
+                    now
+                );
+            }
+
         }
 
     }
@@ -342,16 +360,6 @@ contract Strategy is BaseStrategy {
      * @return _loss, the amount of losses the strategy may have produced until now
      * @return _debtPayment, the amount the strategy has been able to pay back to the vault
      */
-    function prepGov(uint256 _debtOutstanding)
-        external
-        returns (
-            uint256 _profit,
-            uint256 _loss,
-            uint256 _debtPayment
-        )
-    {
-        prepareReturn(_debtOutstanding);
-    }
     function prepareReturn(uint256 _debtOutstanding)
         internal
         override
@@ -702,6 +710,15 @@ contract Strategy is BaseStrategy {
                 balances[1],
                 balances[0] 
             );
+            
+            if(currencyID > 1) {
+                ISushiRouter router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+                address[] memory path = new address[](2);
+                path[0] = address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+                path[1] = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
+
+                tokensOut = router.getAmountsOut(tokensOut, path)[1];
+            }
         }
 
     }
@@ -712,18 +729,24 @@ contract Strategy is BaseStrategy {
      * fees incurred by leaving the position early. Represents the NPV of the position today.
      * @return uint256 _totalWantValue, the total amount of 'want' tokens of the strategy's positions
      */
-     // TODO: Explain this calculation and ask jeff to review it
     function _getNTokenTotalValueFromPortfolio() public view returns(uint256 totalUnderlyingClaim) {
         address nTokenAddress = address(nToken);
 
         return NotionalLpLib.getNTokenTotalValueFromPortfolio(
-            NotionalLpLib.NTokenTotalValueFromPortfolioVars(
-                address(this), 
-                nTokenAddress,
-                nProxy,
-                currencyID
-            )
+                NotionalLpLib.NTokenTotalValueFromPortfolioVars(
+                    address(this), 
+                    nTokenAddress,
+                    nProxy,
+                    currencyID
+                )
             );
+    }
+
+    function _checkIdiosyncratic() internal view returns (bool) {
+        MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
+        bool protectionWindow = false;
+        
+        return protectionWindow;
     }
 
     // CALCS

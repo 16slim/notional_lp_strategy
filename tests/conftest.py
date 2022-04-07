@@ -102,8 +102,8 @@ token_addresses = {
 @pytest.fixture(
     params=[
         # 'WBTC', # WBTC
-        "WETH",  # WETH
-        # 'DAI', # DAI
+        # "WETH",  # WETH
+        'DAI', # DAI
         # 'USDC', # USDC
     ],
     scope="session",

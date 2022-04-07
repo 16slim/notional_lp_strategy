@@ -21,6 +21,7 @@ def test_profitable_harvest(
     amount_tokens = account[1][0][2]
 
     assert amount_tokens > 0
+    # assert 0
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == vault.strategies(strategy)["totalDebt"]
 
     active_markets = n_proxy_views.getActiveMarkets(currencyID)
@@ -67,7 +68,7 @@ def test_profitable_harvest(
 def test_lossy_harvest(
     chain, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
     n_proxy_views, n_proxy_batch, token_whale, currencyID,
-    n_proxy_implementation, gov, million_fcash_notation
+    n_proxy_implementation, gov, million_fcash_notation, balance_threshold
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
@@ -80,21 +81,24 @@ def test_lossy_harvest(
     print("Initial position value: ", initial_value)
     amount_invested = vault.strategies(strategy)["totalDebt"]
     
-    if currencyID == 2:
-        symbol_collateral = "USDC"
-    else:
-        symbol_collateral = "DAI"
-    
-    # Create impermanent loss by borrowing 10 million
-    i = 1
-    while (i <= 10):
-        print("Whale borrowing million ", i)
-        actions.borrow_1m_whales(n_proxy_views, currencyID, 
-            utils.get_token(symbol_collateral), n_proxy_batch, 
-            utils.get_token_whale(symbol_collateral), million_fcash_notation
-            )
-        i+=1
-    
+    if utils.ntoken_net_state(n_proxy_implementation, currencyID) == "lender":
+        if currencyID == 2:
+            symbol_collateral = "USDC"
+        else:
+            symbol_collateral = "DAI"
+        # Create impermanent loss by borrowing 10 million
+        i = 1
+        while (i <= 10):
+            print("Whale borrowing million ", i)
+            actions.borrow_1m_whales(n_proxy_implementation, currencyID, 
+                utils.get_token(symbol_collateral), n_proxy_batch, 
+                utils.get_token_whale(symbol_collateral), million_fcash_notation
+                )
+            i+=1
+    elif utils.ntoken_net_state(n_proxy_implementation, currencyID) == "borrower":
+        # Create impermanent loss by lending
+        actions.whale_drop_rates(n_proxy_batch, token_whale, token, n_proxy_implementation, currencyID, balance_threshold, 1)
+
     final_value = strategy.estimatedTotalAssets()
     print("Final position value: ", final_value)
 
@@ -105,7 +109,9 @@ def test_lossy_harvest(
     vault.updateStrategyDebtRatio(strategy, 0, {"from":vault.governance()})
     strategy.setToggleLiquidatePosition(True, {"from":gov})
     tx = strategy.harvest({"from": strategist})
-    checks.check_harvest_loss(tx, loss, RELATIVE_APPROX)
+    assert tx.events["Harvested"]["profit"] == 0
+    assert tx.events["Harvested"]["loss"] > 0
+    assert tx.events["Harvested"]["debtPayment"] > 0
     chain.sleep(3600 * 6)  # 6 hrs needed for profits to unlock
     chain.mine(1)
 
@@ -140,7 +146,7 @@ def test_choppy_harvest(
     i = 1
     while (i <= 10):
         print("Whale borrowing million ", i)
-        actions.borrow_1m_whales(n_proxy_views, currencyID, 
+        actions.borrow_1m_whales(n_proxy_implementation, currencyID, 
             utils.get_token(symbol_collateral), n_proxy_batch, 
             utils.get_token_whale(symbol_collateral), million_fcash_notation
             )
@@ -182,66 +188,54 @@ def test_choppy_harvest(
 
     vault.withdraw({"from": user})
 
-# def test_maturity_harvest(
-#     chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
-#     n_proxy_views, n_proxy_batch, token_whale, currencyID, n_proxy_account, n_proxy_implementation,
-#     balance_threshold, million_in_token
-# ):
-#     # Deposit to the vault
-#     actions.user_deposit(user, vault, token, amount)
-#     min_market_index = utils.get_min_market_index(strategy, currencyID, n_proxy_views)
+def test_maturity_harvest_after_protection_window(
+    chain, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
+    n_proxy_views, n_proxy_batch, token_whale, currencyID,
+    n_proxy_implementation, gov, million_fcash_notation, million_in_token, n_proxy_account
+):
+    # Deposit to the vault
+    actions.user_deposit(user, vault, token, amount)
     
-#     amount_fcash = n_proxy_views.getfCashAmountGivenCashAmount(
-#         strategy.currencyID(),
-#         - amount / strategy.DECIMALS_DIFFERENCE() * MAX_BPS,
-#         min_market_index,
-#         chain.time()+5
-#         )
-    
-#     # Harvest 1: Send funds through the strategy
-#     chain.sleep(1)
-    
-#     strategy.harvest({"from": strategist})
+    # Harvest 1: Send funds through the strategy
+    chain.sleep(1)
+    strategy.harvest({"from": strategist})
 
-#     account = n_proxy_views.getAccount(strategy)
-#     next_settlement = account[0][0]
+    initial_value = strategy.estimatedTotalAssets()
+    print("Initial position value: ", initial_value)
+    amount_invested = vault.strategies(strategy)["totalDebt"]
 
-#     assert pytest.approx(account[2][0][3], rel=RELATIVE_APPROX) == amount_fcash
+    active_markets = n_proxy_views.getActiveMarkets(currencyID)
+    next_settlement = active_markets[0][1]
+    actions.initialize_intermediary_markets(n_proxy_views, currencyID, n_proxy_implementation, user, 
+        next_settlement, n_proxy_batch, token, token_whale, n_proxy_account, million_in_token)
+    checks.check_active_markets(n_proxy_views, currencyID, n_proxy_implementation, user)
+    chain.sleep(next_settlement - chain.time() + 1)
+    chain.mine(1)
+    checks.check_active_markets(n_proxy_views, currencyID, n_proxy_implementation, user)
+    
+    assert 0
+    vault.updateStrategyDebtRatio(strategy, 0, {"from":gov})
+    strategy.setToggleLiquidatePosition(True, {"from":gov})
+    tx = strategy.harvest({"from":gov})
+    assert pytest.approx(total_assets, rel=RELATIVE_APPROX) == position_cash
+    
+    # Add some code before harvest #2 to simulate earning yield
+    
+    totalAssets = strategy.estimatedTotalAssets()
+    position_cash = account[2][0][3] * strategy.DECIMALS_DIFFERENCE() / MAX_BPS
 
-#     position_cash = n_proxy_views.getCashAmountGivenfCashAmount(
-#         strategy.currencyID(),
-#         - amount_fcash,
-#         min_market_index,
-#         chain.time()+1
-#         )[1] * strategy.DECIMALS_DIFFERENCE() / MAX_BPS
-#     total_assets = strategy.estimatedTotalAssets()
+    assert pytest.approx(position_cash+token.balanceOf(strategy), rel=RELATIVE_APPROX) == totalAssets
+    profit_amount = totalAssets - amount
+    assert profit_amount > 0
     
-#     assert pytest.approx(total_assets, rel=RELATIVE_APPROX) == position_cash
-    
-#     # Add some code before harvest #2 to simulate earning yield
-#     actions.wait_until_settlement(next_settlement)
-#     actions.initialize_intermediary_markets(n_proxy_views, currencyID, n_proxy_implementation, user, 
-#         account[0][0], n_proxy_batch, token, token_whale, n_proxy_account, million_in_token)
-#     checks.check_active_markets(n_proxy_views, currencyID, n_proxy_implementation, user)
-#     chain.sleep(next_settlement - chain.time() + 1)
-#     chain.mine(1)
-#     checks.check_active_markets(n_proxy_views, currencyID, n_proxy_implementation, user)
-#     totalAssets = strategy.estimatedTotalAssets()
-#     position_cash = account[2][0][3] * strategy.DECIMALS_DIFFERENCE() / MAX_BPS
+    vault.updateStrategyDebtRatio(strategy, 0, {"from":vault.governance()})
+    assert tx.events["Harvested"]["profit"] >= profit_amount
 
-#     assert pytest.approx(position_cash+token.balanceOf(strategy), rel=RELATIVE_APPROX) == totalAssets
-#     profit_amount = totalAssets - amount
-#     assert profit_amount > 0
+    chain.sleep(3600 * 6)  # 6 hrs needed for profits to unlock
+    chain.mine(1)
+    assert vault.strategies(strategy)["totalLoss"] == 0
+    assert vault.strategies(strategy)["totalGain"] >= profit_amount
     
-#     vault.updateStrategyDebtRatio(strategy, 0, {"from":vault.governance()})
-#     tx = strategy.harvest()
-#     assert tx.events["Harvested"]["profit"] >= profit_amount
-
-#     chain.sleep(3600 * 6)  # 6 hrs needed for profits to unlock
-#     chain.mine(1)
-#     assert vault.strategies(strategy)["totalLoss"] == 0
-#     assert vault.strategies(strategy)["totalGain"] >= profit_amount
-    
-#     vault.withdraw({"from": user})
+    vault.withdraw({"from": user})
 
     

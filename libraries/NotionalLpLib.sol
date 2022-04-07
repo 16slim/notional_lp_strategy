@@ -43,7 +43,7 @@ library NotionalLpLib {
                 fCashClaim = fCashClaim * nTokenBalance / totalSupply;
                 assetCashClaim = assetCashClaim * nTokenBalance / totalSupply;
 
-                if (fCashClaim > 0) {
+                if (fCashClaim != 0) {
                     uint256 mIndex = getMarketIndexForMaturity(
                         NTokenVars._nProxy,
                         NTokenVars._currencyID,
@@ -59,7 +59,6 @@ library NotionalLpLib {
                 }
                 totalAssetCashClaim += assetCashClaim;
             }
-            // totalAssetCashClaim = totalAssetCashClaim;
 
             (
                 Token memory assetToken,

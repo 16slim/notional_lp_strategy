@@ -79,3 +79,27 @@ def get_token_whale(symbol):
         "DAI": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",
     }
     return accounts.at(whale_addresses[symbol], force=True)
+
+def getMarketIndexForMaturity(markets, maturity):
+    for (i,m) in enumerate(markets):
+        if m[1] == maturity:
+            return i
+    return -1
+
+def ntoken_net_state(n_proxy_implementation, currencyID):
+    nToken = n_proxy_implementation.nTokenAddress(currencyID)
+    (liq, fCash) = n_proxy_implementation.getNTokenPortfolio(nToken)
+    markets = n_proxy_implementation.getActiveMarkets(currencyID)
+
+    net_fcash = 0
+    for (i, fc) in enumerate(fCash):
+        m_index = getMarketIndexForMaturity(markets, fc[1])
+        if m_index >= 0:
+            net_fcash += (fc[3] + int(markets[m_index][2] / markets[m_index][4] * liq[i][3]))
+        
+    if net_fcash > 0:
+        return "lender"
+    elif net_fcash < 0:
+        return "borrower"
+    else:
+        return "neutral"

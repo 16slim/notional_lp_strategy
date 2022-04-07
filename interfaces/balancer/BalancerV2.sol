@@ -25,6 +25,7 @@ interface IBalancerPool is IERC20 {
         uint256 indexIn,
         uint256 indexOut
     ) external view returns (uint256 amount);
+
 }
 
 interface IBalancerVault {
