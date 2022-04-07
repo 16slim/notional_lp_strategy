@@ -27,7 +27,8 @@ def wait_half_until_settlement(next_settlement):
     return
 
 def wait_n_days(days):
-    chain.mine(1, timedelta= 86_400 * days)
+    n_blocks_to_mine = int(days * 86400 / 13)
+    chain.mine(n_blocks_to_mine, timedelta= 86_400 * days)
 
 def borrow_1m_whales(n_proxy_views, currencyID, token, n_proxy_batch, whale, million_fcash_notation):
     million = utils.utils.million_in_token(token)
@@ -134,4 +135,7 @@ def buy_residuals(n_proxy_batch, n_proxy_implementation, currencyID, million_in_
             [trade])], \
                 {"from": token_whale,\
                      "value":0})
-    
+
+def airdrop_amount_rewards(strategy, amount, note_token, note_whale):
+    n_notes = utils.utils.amount_in_NOTE(amount)
+    note_token.transfer(strategy, n_notes, {"from": note_whale})

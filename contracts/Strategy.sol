@@ -61,7 +61,7 @@ contract Strategy is BaseStrategy {
     uint256 public DECIMALS_DIFFERENCE;
     // minimum amount of want to act on
     uint256 public minAmountWant;
-    uint8 private unused = 1;
+    uint8 private unused = 0;
     // Initialize WETH interface
     IWETH public constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // Constant necessary to accept ERC1155 fcash tokens (for migration purposes) 
@@ -314,7 +314,8 @@ contract Strategy is BaseStrategy {
     }
 
     function _claimRewards() public {
-        uint256 _incentives = nProxy.nTokenClaimIncentives();
+        uint256 _incentives = noteToken.balanceOf(address(this));
+        _incentives += nProxy.nTokenClaimIncentives();
 
         if (_incentives > 0) {
             IBalancerVault.SingleSwap memory swap = IBalancerVault.SingleSwap(
@@ -338,7 +339,7 @@ contract Strategy is BaseStrategy {
                 IERC20(address(weth)).safeApprove(address(router), weth.balanceOf(address(this)));
                 address[] memory path = new address[](2);
                 path[0] = address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-                path[1] = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
+                path[1] = address(want);
                 router.swapExactTokensForTokens(
                     weth.balanceOf(address(this)),
                     0,
@@ -686,8 +687,8 @@ contract Strategy is BaseStrategy {
 
     function _getRewardsValue() public view returns(uint256 tokensOut) {
         // - get trading rate from balancer
-        uint256 claimableRewards = nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
-
+        uint256 claimableRewards = noteToken.balanceOf(address(this));
+        claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
         if (claimableRewards > 0) {
             (IERC20[] memory tokens,
             uint256[] memory balances,
@@ -715,7 +716,7 @@ contract Strategy is BaseStrategy {
                 ISushiRouter router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
                 address[] memory path = new address[](2);
                 path[0] = address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-                path[1] = address(0x6B175474E89094C44Da98b954EedeAC495271d0F);
+                path[1] = address(want);
 
                 tokensOut = router.getAmountsOut(tokensOut, path)[1];
             }

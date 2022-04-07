@@ -103,3 +103,6 @@ def ntoken_net_state(n_proxy_implementation, currencyID):
         return "borrower"
     else:
         return "neutral"
+
+def amount_in_NOTE(amount):
+    return round(amount / 1.3) * 10 ** 8

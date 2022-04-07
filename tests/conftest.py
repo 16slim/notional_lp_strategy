@@ -80,6 +80,10 @@ def note_token(n_proxy_implementation):
     yield Contract(n_proxy_implementation.getNoteToken())
 
 @pytest.fixture
+def note_whale():
+    yield "0x22341fB5D92D3d801144aA5A925F401A91418A05"
+
+@pytest.fixture
 def balancer_vault():
     yield Contract("0xBA12222222228d8Ba445958a75a0704d566BF2C8")
 
@@ -103,8 +107,8 @@ token_addresses = {
     params=[
         # 'WBTC', # WBTC
         # "WETH",  # WETH
-        'DAI', # DAI
-        # 'USDC', # USDC
+        # 'DAI', # DAI
+        'USDC', # USDC
     ],
     scope="session",
     autouse=True,
@@ -123,7 +127,7 @@ thresholds = {
     "WETH": (1000e18, -500e8),
     "DAI": (30e24, -30e14),
     "WBTC": (50e8, -50e8),
-    "USDC": (60e12, -60e14),
+    "USDC": (20e12, -20e14),
 }
 
 @pytest.fixture

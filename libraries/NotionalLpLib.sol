@@ -67,7 +67,8 @@ library NotionalLpLib {
                 AssetRateParameters memory assetRate
             ) = NTokenVars._nProxy.getCurrencyAndRates(NTokenVars._currencyID);
 
-            totalUnderlyingClaim = uint256(totalAssetCashClaim * assetRate.rate / assetRate.underlyingDecimals);
+            // totalUnderlyingClaim = uint256(totalAssetCashClaim);
+            totalUnderlyingClaim = uint256(totalAssetCashClaim * assetRate.rate / 1e18);
         }
     }
 
