@@ -59,7 +59,6 @@ contract Strategy is BaseStrategy {
     uint16 public currencyID; 
     // minimum amount of want to act on
     uint256 public minAmountWant;
-    uint8 private unused = 1;
     // Initialize Sushi router interface
     ISushiRouter router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
     // Initialize WETH interface
