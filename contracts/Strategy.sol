@@ -6,12 +6,14 @@ pragma experimental ABIEncoderV2;
 // Necessary interfaces to:
 // 1) interact with the Notional protocol
 import "../interfaces/notional/NotionalProxy.sol";
+import "../interfaces/notional/nTokenERC20.sol";
 // 2) Transact between WETH (Vault) and ETH (Notional)
 import "../interfaces/IWETH.sol";
+// 3) Swap and quote rewards to any want
 import "../interfaces/balancer/BalancerV2.sol";
-import "../interfaces/notional/nTokenERC20.sol";
 import "../interfaces/sushi/ISushiRouter.sol";
 
+// 4) Views not fitting in the contract due to bytecode
 import "../libraries/NotionalLpLib.sol";
 
 // These are the core Yearn libraries
