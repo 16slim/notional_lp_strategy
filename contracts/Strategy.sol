@@ -57,11 +57,11 @@ contract Strategy is BaseStrategy {
     bytes32 private poolId;
     // ID of the asset being lent in Notional
     uint16 public currencyID; 
-    // Difference of decimals between Notional system (8) and want
-    uint256 public DECIMALS_DIFFERENCE;
     // minimum amount of want to act on
     uint256 public minAmountWant;
-    uint8 private unused = 0;
+    uint8 private unused = 1;
+    // Initialize Sushi router interface
+    ISushiRouter router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
     // Initialize WETH interface
     IWETH public constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // Constant necessary to accept ERC1155 fcash tokens (for migration purposes) 
@@ -70,17 +70,8 @@ contract Strategy is BaseStrategy {
     bool internal toggleLiquidatePosition;
     // To control when rewards are claimed 
     bool internal toggleClaimRewards;
-    // Base for percentage calculations. BPS (10000 = 100%, 100 = 1%)
-    uint256 private constant MAX_BPS = 10_000;
-    // Time constants
-    uint256 private constant DAY = 86_400;
-    SwapSteps[] internal swapSteps;
+    
     uint256 internal constant MAX_UINT = type(uint256).max;
-
-    struct SwapSteps {
-        bytes32[] poolIds;
-        IAsset[] assets;
-    }
 
     // EVENTS
     event Cloned(address indexed clone);
@@ -152,7 +143,6 @@ contract Strategy is BaseStrategy {
         nProxy = _nProxy;
 
         (Token memory assetToken, Token memory underlying) = _nProxy.getCurrency(_currencyID);
-        DECIMALS_DIFFERENCE = uint256(underlying.decimals).mul(MAX_BPS).div(uint256(assetToken.decimals));
         
         // By default do not realize losses
         toggleLiquidatePosition = false;
@@ -331,14 +321,13 @@ contract Strategy is BaseStrategy {
                 swap, 
                 IBalancerVault.FundManagement(address(this), false, address(this), false),
                 _incentives, 
-                now+10
+                now
                 );
             
             if (currencyID > 1) {
-                ISushiRouter router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
                 IERC20(address(weth)).safeApprove(address(router), weth.balanceOf(address(this)));
                 address[] memory path = new address[](2);
-                path[0] = address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+                path[0] = address(weth);
                 path[1] = address(want);
                 router.swapExactTokensForTokens(
                     weth.balanceOf(address(this)),
@@ -347,6 +336,7 @@ contract Strategy is BaseStrategy {
                     address(this),
                     now
                 );
+                IERC20(address(weth)).safeApprove(address(router), 0);
             }
 
         }
@@ -476,7 +466,6 @@ contract Strategy is BaseStrategy {
      * @return uint256 _liquidatedAmount, Amount freed
      * @return uint256 _loss, Losses incurred due to early closing of positions
      */
-    event n(string s, uint256 n);
     function liquidatePosition(uint256 _amountNeeded)
         internal
         override
@@ -487,26 +476,20 @@ contract Strategy is BaseStrategy {
         if (wantBalance >= _amountNeeded) {
             return (_amountNeeded, 0);
         }
-        emit n("_amountNeeded", _amountNeeded);
         // Get current position's P&L
         (, uint256 unrealisedLosses) = getUnrealisedPL();
-        emit n("unrealisedLosses", unrealisedLosses);
         // We only need to withdraw what we don't currently have in want
         uint256 amountToLiquidate = _amountNeeded.sub(wantBalance);
-        emit n("wantBalance", wantBalance);
-        emit n("amountToLiquidate", amountToLiquidate);
         
         // The strategy will only realise losses proportional to the amount we are liquidating
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
         uint256 lossesToBeRealised = unrealisedLosses.mul(amountToLiquidate).div(totalDebt.sub(wantBalance));
-        emit n("lossesToBeRealised", lossesToBeRealised);
 
         // Due to how Notional works, we need to substract losses from the amount to liquidate
         // If we don't do this and withdraw a small enough % of position, we will not incur in losses,
         // leaving them for the future withdrawals (which is bad! those who withdraw should take the losses)
         
         amountToLiquidate = amountToLiquidate.sub(lossesToBeRealised);
-        emit n("amountToLiquidate", amountToLiquidate);
         
         // Minor gas savings
         uint16 _currencyID = currencyID;
@@ -519,7 +502,6 @@ contract Strategy is BaseStrategy {
             .mul(nProxy.nTokenBalanceOf(_currencyID, address(this)))
             .div(_getNTokenTotalValueFromPortfolio()
                 );
-        emit n("tokensToRedeem", tokensToRedeem);
         
         
         // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
@@ -533,12 +515,10 @@ contract Strategy is BaseStrategy {
 
         // Assess result 
         uint256 totalAssets = balanceOfWant();
-        emit n("totalAssets", totalAssets);
         if (_amountNeeded > totalAssets) {
             _liquidatedAmount = totalAssets;
             // _loss should be equal to lossesToBeRealised ! 
             _loss = _amountNeeded.sub(totalAssets);
-            emit n("_loss", _loss);
             
         } else {
             _liquidatedAmount = totalAssets;
@@ -713,9 +693,8 @@ contract Strategy is BaseStrategy {
             );
             
             if(currencyID > 1) {
-                ISushiRouter router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
                 address[] memory path = new address[](2);
-                path[0] = address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+                path[0] = address(weth);
                 path[1] = address(want);
 
                 tokensOut = router.getAmountsOut(tokensOut, path)[1];

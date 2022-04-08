@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 
 library NotionalLpLib {
     using SafeMath for uint256;
+    int256 private constant PRICE_DECIMALS = 1e18;
 
     struct NTokenTotalValueFromPortfolioVars {
         address _strategy;
@@ -67,8 +68,7 @@ library NotionalLpLib {
                 AssetRateParameters memory assetRate
             ) = NTokenVars._nProxy.getCurrencyAndRates(NTokenVars._currencyID);
 
-            // totalUnderlyingClaim = uint256(totalAssetCashClaim);
-            totalUnderlyingClaim = uint256(totalAssetCashClaim * assetRate.rate / 1e18);
+            totalUnderlyingClaim = uint256(totalAssetCashClaim * assetRate.rate / PRICE_DECIMALS);
         }
     }
 
