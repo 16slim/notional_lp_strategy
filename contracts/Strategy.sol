@@ -61,7 +61,6 @@ contract Strategy is BaseStrategy {
     IBalancerVault private balancerVault;
     // Id of the balancer NOTE/WETH pool to use
     bytes32 private poolId;
-    uint16 private unused=0;
     // ID of the asset being lent in Notional
     uint16 private currencyID;
     // minimum amount of want to act on
@@ -591,8 +590,6 @@ contract Strategy is BaseStrategy {
                 );
         
         // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
-        // TODO: handle the 24h protection period after market roll to avoid reverting due to
-        // idiosyncratic cash, create another toggle to force exit out of ths position
         executeBalanceAction(
             DepositActionType.RedeemNToken, 
             tokensToRedeem,
@@ -808,17 +805,6 @@ contract Strategy is BaseStrategy {
             );
     }
 
-    /*
-    *   TODO: Implement a function to check whether the nToken has idiosyncratic positions today and thus, cannot
-    * redeem the strategy's position, i.e. we are in the 24h protection window
-    */
-    function _checkIdiosyncratic() internal view returns (bool) {
-        MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
-        bool protectionWindow = false;
-        
-        return protectionWindow;
-    }
-
     // CALCS
     /*
      * @notice
@@ -842,14 +828,24 @@ contract Strategy is BaseStrategy {
      * @param redeemToUnderlying, whether to redeem asset cash to the underlying token on withdraw
      * @param trades, array of bytes32 trades to perform
      */
+    function checkIdiosyncratic() external view returns(bool){
+        return NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken));
+    }
+
     function executeBalanceAction(
         DepositActionType actionType,
         uint256 depositActionAmount,
         uint256 withdrawAmountInternalPrecision
         ) internal {
+
+        uint16 _currencyID = currencyID;
+        // Handle the 24h protection window where an nToken may have an idiosyncratic position
+        if (NotionalLpLib.checkIdiosyncratic(nProxy, _currencyID, address(nToken))) {
+            return;
+        }
+
         BalanceAction[] memory actions = new BalanceAction[](1);
         // gas savings
-        uint16 _currencyID = currencyID;
         actions[0] = BalanceAction(
             actionType,
             _currencyID,

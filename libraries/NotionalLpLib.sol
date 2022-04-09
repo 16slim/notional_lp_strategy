@@ -32,6 +32,12 @@ library NotionalLpLib {
         NTokenTotalValueFromPortfolioVars memory NTokenVars
         ) public view returns(uint256 totalUnderlyingClaim) {
         
+        // If the nToken has an idiosyncratic position we are in the 24h lock period and cannot calculate the 
+        // portfolio value as there is an fcash position without market
+        if (checkIdiosyncratic(NTokenVars._nProxy, NTokenVars._currencyID, NTokenVars._nProxy.nTokenAddress(NTokenVars._currencyID))) {
+            return 0;
+        }
+
         // First step, get how many nTokens the strategy owns
         (, int256 nTokenBalance, ) = NTokenVars._nProxy.getAccountBalance(NTokenVars._currencyID, NTokenVars._strategy);
 
@@ -132,6 +138,30 @@ library NotionalLpLib {
         if (success == false) {
             return 0;
         }
+    }
+
+    /*
+     * @notice
+     *  Check whether the nToken has an idiosyncratic fcash position (non-opeable market) by looping through
+     * the nToken positions (max is 3) and check whether it has a current active market or not
+     * @param _nProxy, Notional proxy address
+     * @param _currencyID, Currency ID of the strategy
+     * @param _nTokenAddress, Address for the nToken
+     * @return bool indicating whether the nToken has an idiosyncratic position or not
+     */
+    function checkIdiosyncratic(
+        NotionalProxy _nProxy,
+        uint16 _currencyID,
+        address _nTokenAddress
+    ) public view returns(bool) {
+        MarketParameters[] memory _activeMarkets = _nProxy.getActiveMarkets(_currencyID);
+        (, PortfolioAsset[] memory netfCashAssets) = _nProxy.getNTokenPortfolio(_nTokenAddress);
+        for(uint256 i=0; i<netfCashAssets.length; i++){
+            if(getMarketIndexForMaturity(_nProxy, _currencyID, netfCashAssets[i].maturity) == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }
