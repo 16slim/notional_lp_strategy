@@ -650,6 +650,10 @@ contract Strategy is BaseStrategy {
         return balanceOfWant();
     }
 
+    /*
+     * @notice
+     *  External function used in emergency to claim and swap to want tokens the NOTE rewards
+     */
     function manuallyClaimRewards() external onlyVaultManagers {
         _claimRewards();
     }
