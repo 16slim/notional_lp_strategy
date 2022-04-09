@@ -373,6 +373,15 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
+     *  View reutning whether or not the nToken has an idiosyncratic position
+     * @return bool, value containing if there is an idiosyncratic position or not
+     */
+    function checkIdiosyncratic() external view returns(bool){
+        return NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken));
+    }
+
+    /*
+     * @notice
      *  Function claiming the pending rewards for the strategy (if any), swap them to WETH in balancer
      * as it's the primary exchange venue for NOTE (only a NOTE / WETH pool available) and if want is not WETH, 
      * swap the obtained in WETH in Sushi
@@ -828,10 +837,6 @@ contract Strategy is BaseStrategy {
      * @param redeemToUnderlying, whether to redeem asset cash to the underlying token on withdraw
      * @param trades, array of bytes32 trades to perform
      */
-    function checkIdiosyncratic() external view returns(bool){
-        return NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken));
-    }
-
     function executeBalanceAction(
         DepositActionType actionType,
         uint256 depositActionAmount,
