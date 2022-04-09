@@ -43,7 +43,7 @@ def test_profitable_harvest(
     assert tx.events["Harvested"]["loss"] == 0
     assert tx.events["Harvested"]["debtPayment"] == 0
 
-    chain.mine(1, timestamp=first_settlement)
+    chain.mine(1, timestamp=first_settlement-100)
     checks.check_active_markets(n_proxy_views, currencyID, n_proxy_implementation, user)
 
     before_pps = vault.pricePerShare()
