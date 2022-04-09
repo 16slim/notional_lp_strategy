@@ -58,11 +58,11 @@ contract Strategy is BaseStrategy {
     IBalancerVault private balancerVault;
     bytes32 private poolId;
     // ID of the asset being lent in Notional
-    uint16 public currencyID; 
+    uint16 public currencyID;
     // minimum amount of want to act on
     uint256 public minAmountWant;
     // Initialize Sushi router interface
-    ISushiRouter router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+    ISushiRouter public constant router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
     // Initialize WETH interface
     IWETH public constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // Constant necessary to accept ERC1155 fcash tokens (for migration purposes) 
@@ -147,6 +147,8 @@ contract Strategy is BaseStrategy {
         
         // By default do not realize losses
         toggleLiquidatePosition = false;
+        // By default claim rewrds
+        toggleClaimRewards = true;
 
         // Initialize NOTE token and nToken
         noteToken = IERC20(nProxy.getNoteToken());
@@ -253,6 +255,9 @@ contract Strategy is BaseStrategy {
      */
     function setToggleLiquidatePosition(bool _newToggle) external onlyEmergencyAuthorized {
         toggleLiquidatePosition = _newToggle;
+    }
+    function setToggleClaimRewards(bool _newToggle) external onlyEmergencyAuthorized {
+        toggleClaimRewards = _newToggle;
     }
 
     /*
@@ -549,7 +554,9 @@ contract Strategy is BaseStrategy {
      * @return uint256 amountLiquidated, the total amount liquidated
      */
     function liquidateAllPositions() internal override returns (uint256) {
-        if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0 && 
+        uint256 claimableRewards = noteToken.balanceOf(address(this));
+        claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+        if(claimableRewards > 0 && 
             toggleClaimRewards) {
             _claimRewards();
         }
@@ -569,18 +576,15 @@ contract Strategy is BaseStrategy {
      * @param _newStrategy address where the contract of the new strategy is located
      */
     function prepareMigration(address _newStrategy) internal override {
-        if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0 && 
+        uint256 claimableRewards = noteToken.balanceOf(address(this));
+        claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+        if(claimableRewards > 0 && 
             toggleClaimRewards) {
             _claimRewards();
         }
         // Transfer nTokens and NOTE incentives (may be necessary to claim them)
-        uint256 nTokenBalance = nProxy.nTokenBalanceOf(currencyID, address(this));
-        nProxy.nTokenTransfer(
-            currencyID, 
-            address(this), 
-            _newStrategy, 
-            nTokenBalance
-            );
+        uint256 nTokenBalance = nToken.balanceOf(address(this));
+        nToken.transfer(_newStrategy, nTokenBalance);
     }
 
     /*
