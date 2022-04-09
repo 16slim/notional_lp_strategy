@@ -59,6 +59,7 @@ contract Strategy is BaseStrategy {
     bytes32 private poolId;
     // ID of the asset being lent in Notional
     uint16 public currencyID;
+    uint16 internalunused = 0;
     // minimum amount of want to act on
     uint256 public minAmountWant;
     // Initialize Sushi router interface
@@ -276,15 +277,12 @@ contract Strategy is BaseStrategy {
     function getBalancerPool() external view returns (address) {
         return address(balancerPool);
     }
+    function getRewardsValue() external view returns (uint256) {
+        return _getRewardsValue();
+    }
 
     function setBalancerVault(address _newVault) external onlyGovernance {
-        // want.approve(address(balancerVault), 0);
-        // noteToken.approve(address(balancerVault), 0);
-        
         balancerVault = IBalancerVault(_newVault);
-
-        // want.approve(_newVault, MAX_UINT);
-        // noteToken.approve(_newVault, MAX_UINT);
     }
 
     function setBalancerPool(bytes32 _newPoolId) external onlyVaultManagers {
@@ -309,7 +307,7 @@ contract Strategy is BaseStrategy {
         ;
     }
 
-    function _claimRewards() public {
+    function _claimRewards() internal {
         uint256 _incentives = noteToken.balanceOf(address(this));
         _incentives += nProxy.nTokenClaimIncentives();
 
@@ -569,6 +567,10 @@ contract Strategy is BaseStrategy {
 
         return balanceOfWant();
     }
+
+    function manuallyClaimRewards() external onlyVaultManagers {
+        _claimRewards();
+    }
     
     /*
      * @notice
@@ -670,7 +672,7 @@ contract Strategy is BaseStrategy {
 
     // INTERNAL FUNCTIONS
 
-    function _getRewardsValue() public view returns(uint256 tokensOut) {
+    function _getRewardsValue() internal view returns(uint256 tokensOut) {
         // - get trading rate from balancer
         uint256 claimableRewards = noteToken.balanceOf(address(this));
         claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
@@ -714,7 +716,7 @@ contract Strategy is BaseStrategy {
      * fees incurred by leaving the position early. Represents the NPV of the position today.
      * @return uint256 _totalWantValue, the total amount of 'want' tokens of the strategy's positions
      */
-    function _getNTokenTotalValueFromPortfolio() public view returns(uint256 totalUnderlyingClaim) {
+    function _getNTokenTotalValueFromPortfolio() internal view returns(uint256 totalUnderlyingClaim) {
         address nTokenAddress = address(nToken);
 
         return NotionalLpLib.getNTokenTotalValueFromPortfolio(
