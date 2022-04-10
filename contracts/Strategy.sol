@@ -393,7 +393,7 @@ contract Strategy is BaseStrategy {
      * swap the obtained in WETH in Sushi
      * @return uint256, value containing the current valuation of accumulakted rewards
      */
-    function _claimRewards() internal {
+    function _claimAndSellRewards() internal {
         uint256 _incentives = noteToken.balanceOf(address(this));
         _incentives += nProxy.nTokenClaimIncentives();
 
@@ -455,7 +455,7 @@ contract Strategy is BaseStrategy {
         )
     {   
         // Get all possible rewards to th strategy (in want)
-        _claimRewards();
+        _claimAndSellRewards();
         // We only need profit for decision making
         (_profit, ) = getUnrealisedPL();
 
@@ -648,7 +648,7 @@ contract Strategy is BaseStrategy {
             uint256 claimableRewards = noteToken.balanceOf(address(this));
             claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
             if(claimableRewards > 0) {
-                _claimRewards();
+                _claimAndSellRewards();
             }
         }
         uint256 nTokenBalance = nToken.balanceOf(address(this));
@@ -664,8 +664,8 @@ contract Strategy is BaseStrategy {
      * @notice
      *  External function used in emergency to claim and swap to want tokens the NOTE rewards
      */
-    function manuallyClaimRewards() external onlyVaultManagers {
-        _claimRewards();
+    function manuallyClaimAndSellRewards() external onlyVaultManagers {
+        _claimAndSellRewards();
     }
     
     /*
@@ -678,7 +678,7 @@ contract Strategy is BaseStrategy {
             uint256 claimableRewards = noteToken.balanceOf(address(this));
             claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
             if(claimableRewards > 0) {
-                _claimRewards();
+                _claimAndSellRewards();
             }
         }
         // Transfer nTokens and NOTE incentives (may be necessary to claim them)
