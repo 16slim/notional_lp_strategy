@@ -46,7 +46,7 @@ def test_migration(
     new_new_strategy = strategist.deploy(Strategy, vault, notional_proxy, currencyID, strategy.getBalancerVault(), balancer_note_weth_pool)
     new_strategy.setToggleClaimRewards(False, {"from":gov})
 
-    prev_rewards = new_strategy._getRewardsValue()
+    prev_rewards = new_strategy.getRewardsValue()
 
     vault.migrateStrategy(new_strategy, new_new_strategy, {"from": gov})
 
