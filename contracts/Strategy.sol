@@ -478,7 +478,10 @@ contract Strategy is BaseStrategy {
             if(amountAvailable >= amountRequired) {
                 // There are no realisedLosses, debt is paid entirely
                 _debtPayment = _debtOutstanding;
-                _profit = amountAvailable.sub(_debtOutstanding);
+                // In case we liberate a higher amount than needed (liquidatePosition uses the estimation of
+                // the value in the portfolio + performs a proportion), we avoid declaring as profit
+                // part of the principal position
+                _profit = Math.min(amountAvailable.sub(_debtOutstanding), amountRequired.sub(_debtPayment));
             } else {
                 // we were not able to free enough funds
                 if(amountAvailable < _debtOutstanding) {
