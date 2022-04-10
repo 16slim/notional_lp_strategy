@@ -350,12 +350,20 @@ contract Strategy is BaseStrategy {
         balancerPool = IBalancerPool(balancerPoolAddress);
     }
 
+    /*
+     * @notice
+     *  Internal function to refresh NOTE and NToken addresses in the initializer and the external setter
+     */
     function _updateNotionalAddresses() internal {
         // Initialize NOTE token and nToken
         noteToken = IERC20(nProxy.getNoteToken());
         nToken = nTokenERC20(nProxy.nTokenAddress(currencyID));
     }
 
+    /*
+     * @notice
+     *  External function to update the NOTE and nToken addresses after deployment
+     */
     function updateNotionalAddresses() external onlyVaultManagers {
         _updateNotionalAddresses();
     }
