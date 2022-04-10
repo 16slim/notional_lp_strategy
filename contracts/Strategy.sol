@@ -55,7 +55,7 @@ contract Strategy is BaseStrategy {
     IERC20 private noteToken;
     // Address of the nToken we interact with
     nTokenERC20 public nToken;
-    // Balancer pool contrct to swap NOTE for WETH
+    // Balancer pool contract to swap NOTE for WETH
     IBalancerPool private balancerPool;
     // Balancer vault used to swap rewards
     IBalancerVault private balancerVault;
@@ -66,9 +66,9 @@ contract Strategy is BaseStrategy {
     // minimum amount of want to act on
     uint256 private minAmountWant;
     // Initialize Sushi router interface to swap WETH for want
-    ISushiRouter public constant router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+    ISushiRouter private constant router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
     // Initialize WETH interface
-    IWETH public constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // To control when positions should be liquidated 
     bool internal toggleLiquidatePosition;
     // To control when rewards are claimed 
@@ -155,12 +155,11 @@ contract Strategy is BaseStrategy {
         
         // By default do not realize losses
         toggleLiquidatePosition = false;
-        // By default claim rewrds
+        // By default claim rewards
         toggleClaimRewards = true;
 
         // Initialize NOTE token and nToken
-        noteToken = IERC20(nProxy.getNoteToken());
-        nToken = nTokenERC20(nProxy.nTokenAddress(_currencyID));
+        _updateNotionalAddresses();
 
         // Check whether the currency is set up right
         if (_currencyID == 1) {
@@ -175,9 +174,6 @@ contract Strategy is BaseStrategy {
         (address balancerPoolAddress,) = balancerVault.getPool(_poolId);
         balancerPool = IBalancerPool(balancerPoolAddress);
 
-        // Approve movements from balancerVault
-        want.approve(address(balancerVault), MAX_UINT);
-        noteToken.approve(address(balancerVault), MAX_UINT);
     }
 
     /*
@@ -340,7 +336,7 @@ contract Strategy is BaseStrategy {
      *  Setter function for the balancer vault ot use
      * @param _newVault, new address of the balancer vault to use
      */
-    function setBalancerVault(address _newVault) external onlyVaultManagers {
+    function setBalancerVault(address _newVault) external onlyGovernance {
         balancerVault = IBalancerVault(_newVault);
     }
 
@@ -352,6 +348,16 @@ contract Strategy is BaseStrategy {
     function setBalancerPool(bytes32 _newPoolId) external onlyVaultManagers {
         (address balancerPoolAddress,) = balancerVault.getPool(_newPoolId);
         balancerPool = IBalancerPool(balancerPoolAddress);
+    }
+
+    function _updateNotionalAddresses() internal {
+        // Initialize NOTE token and nToken
+        noteToken = IERC20(nProxy.getNoteToken());
+        nToken = nTokenERC20(nProxy.nTokenAddress(currencyID));
+    }
+
+    function updateNotionalAddresses() external onlyVaultManagers {
+        _updateNotionalAddresses();
     }
 
     /*
@@ -401,6 +407,7 @@ contract Strategy is BaseStrategy {
                 _incentives,
                 abi.encode(0)
             );
+            IERC20(address(noteToken)).safeApprove(address(balancerVault), _incentives);
              // Swap the NOTE tokens to WETH
             balancerVault.swap(
                 swap, 
@@ -408,7 +415,7 @@ contract Strategy is BaseStrategy {
                 _incentives, 
                 now
                 );
-            
+            IERC20(address(noteToken)).safeApprove(address(balancerVault), 0);
             if (currencyID > 1) {
                 IERC20(address(weth)).safeApprove(address(router), weth.balanceOf(address(this)));
                 // Path for Sushi is [weth, want]
@@ -519,14 +526,13 @@ contract Strategy is BaseStrategy {
             // Only necessary for wETH/ ETH pair
             weth.withdraw(availableWantBalance);
         } else {
-            want.approve(address(nProxy), availableWantBalance);
+            want.safeApprove(address(nProxy), availableWantBalance);
         }
 
         // Deposit all and mint all possible nTokens
         executeBalanceAction(
             DepositActionType.DepositUnderlyingAndMintNToken,
-            availableWantBalance,
-            0
+            availableWantBalance
         );
 
     }
@@ -601,8 +607,7 @@ contract Strategy is BaseStrategy {
         // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
         executeBalanceAction(
             DepositActionType.RedeemNToken, 
-            tokensToRedeem,
-            0
+            tokensToRedeem
         );
 
         // Assess result 
@@ -629,8 +634,7 @@ contract Strategy is BaseStrategy {
     function redeemNTokenAmount(uint256 amountToRedeem) external onlyVaultManagers {
         executeBalanceAction(
                     DepositActionType.RedeemNToken, 
-                    amountToRedeem,
-                    0
+                    amountToRedeem
                 );
     }
 
@@ -640,17 +644,17 @@ contract Strategy is BaseStrategy {
      * @return uint256 amountLiquidated, the total amount liquidated
      */
     function liquidateAllPositions() internal override returns (uint256) {
-        uint256 claimableRewards = noteToken.balanceOf(address(this));
-        claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
-        if(claimableRewards > 0 && 
-            toggleClaimRewards) {
-            _claimRewards();
+        if (toggleClaimRewards) {
+            uint256 claimableRewards = noteToken.balanceOf(address(this));
+            claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+            if(claimableRewards > 0) {
+                _claimRewards();
+            }
         }
         uint256 nTokenBalance = nToken.balanceOf(address(this));
         executeBalanceAction(
                     DepositActionType.RedeemNToken, 
-                    nTokenBalance,
-                    0
+                    nTokenBalance
                 );
 
         return balanceOfWant();
@@ -670,11 +674,12 @@ contract Strategy is BaseStrategy {
      * @param _newStrategy address where the contract of the new strategy is located
      */
     function prepareMigration(address _newStrategy) internal override {
-        uint256 claimableRewards = noteToken.balanceOf(address(this));
-        claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
-        if(claimableRewards > 0 && 
-            toggleClaimRewards) {
-            _claimRewards();
+        if (toggleClaimRewards) {
+            uint256 claimableRewards = noteToken.balanceOf(address(this));
+            claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+            if(claimableRewards > 0) {
+                _claimRewards();
+            }
         }
         // Transfer nTokens and NOTE incentives (may be necessary to claim them)
         uint256 nTokenBalance = nToken.balanceOf(address(this));
@@ -839,8 +844,7 @@ contract Strategy is BaseStrategy {
      */
     function executeBalanceAction(
         DepositActionType actionType,
-        uint256 depositActionAmount,
-        uint256 withdrawAmountInternalPrecision
+        uint256 depositActionAmount
         ) internal {
 
         uint16 _currencyID = currencyID;
@@ -855,7 +859,7 @@ contract Strategy is BaseStrategy {
             actionType,
             _currencyID,
             depositActionAmount,
-            withdrawAmountInternalPrecision,
+            0,
             true, 
             true
         );
