@@ -52,7 +52,7 @@ def test_profitable_harvest(
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
     strategy.setToggleLiquidatePosition(True, {"from": vault.governance()})
     
-    tx2 = strategy.harvest()
+    tx2 = strategy.harvest({"from": gov})
 
     account = n_proxy_views.getAccount(strategy)
     
