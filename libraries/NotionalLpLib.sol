@@ -5,11 +5,19 @@ pragma experimental ABIEncoderV2;
 // Necessary interfaces to:
 // 1) interact with the Notional protocol
 import "../interfaces/notional/NotionalProxy.sol";
+import "../interfaces/notional/nTokenERC20.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
+import {
+    IERC20
+} from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "../interfaces/balancer/BalancerV2.sol";
+import "../interfaces/sushi/ISushiRouter.sol";
+import "../interfaces/IWETH.sol";
 
 library NotionalLpLib {
     using SafeMath for uint256;
     int256 private constant PRICE_DECIMALS = 1e18;
+    IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
     struct NTokenTotalValueFromPortfolioVars {
         address _strategy;
@@ -162,6 +170,68 @@ library NotionalLpLib {
             }
         }
         return false;
+    }
+
+    /*
+     * @notice
+     *  External view estimating the rewards value in want tokens. We simulate the trade in balancer to 
+     * get WETH from the NOTE / WETH pool and if want is not weth, we simulate a trade in sushi to obtain want tokens 
+     * @param noteToken, rewards token to estimate value
+     * @param nProxy, notional proxy distributing the rewards
+     * @param balancerVault, vault address in Balancer to simulate the swap
+     * @param poolId, identifier NOTE/weth pool in balancer
+     * @param currencyID, identifier of the currency operated in the strategy
+     * @param router, sushi router used to estimate simulate the weth / want trade
+     * @param want, address of the want token to convert the rewards to
+     * @return uint256 tokensOut, current number of want tokens the strategy would obtain for its rewards
+     */
+    function getRewardsValue(
+        IERC20 noteToken,
+        NotionalProxy nProxy,
+        IBalancerVault balancerVault,
+        bytes32 poolId,
+        IBalancerPool balancerPool,
+        uint16 currencyID,
+        ISushiRouter router,
+        address want
+    ) external view returns(uint256 tokensOut) {
+        // Get NOTE rewards
+        uint256 claimableRewards = noteToken.balanceOf(address(this));
+        claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+        if (claimableRewards > 0) {
+            (IERC20[] memory tokens,
+            uint256[] memory balances,
+            uint256 lastChangeBlock) = balancerVault.getPoolTokens(poolId);
+            // Setup SwapRequest object for balancer
+            IBalancerPool.SwapRequest memory swapRequest = IBalancerPool.SwapRequest(
+                IBalancerPool.SwapKind.GIVEN_IN,
+                tokens[1],
+                tokens[0],
+                claimableRewards,
+                poolId,
+                lastChangeBlock,
+                address(this),
+                address(this),
+                abi.encode(0)
+            );
+            // Simulate NOTE/WETH trade
+            tokensOut = balancerPool.onSwap(
+                swapRequest, 
+                balances[1],
+                balances[0] 
+            );
+            
+            // If want is not weth, simulate sushi trade
+            if(currencyID > 1) {
+                // Sushi path is [weth, want]
+                address[] memory path = new address[](2);
+                path[0] = address(weth);
+                path[1] = address(want);
+                // Get expected number of tokens out
+                tokensOut = router.getAmountsOut(tokensOut, path)[1];
+            }
+        }
+
     }
 
 }
