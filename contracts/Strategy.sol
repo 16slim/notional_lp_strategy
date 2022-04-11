@@ -157,7 +157,7 @@ contract Strategy is BaseStrategy {
         // By default do not realize losses
         toggleLiquidatePosition = false;
         // By default claim rewards
-        toggleClaimRewards = true;
+        toggleClaimRewards = false;
 
         // Initialize NOTE token and nToken
         _updateNotionalAddresses();
@@ -943,7 +943,22 @@ contract Strategy is BaseStrategy {
         }
     }
 
-    // TODO: Implement harvestTrigger that checks whether in 24h we'll be in the 24h protection window after maturity
-    // do it by checking maturity time of market index == 1    
+     /*
+     * @notice
+     *  Public function used by the keeper to assess whether a harvest is necessary or not, 
+     * returns true only if there is a position to settle
+     * @param callCostInWei, call cost estimation performed by the keeper
+     * @return bool, true when the strategy has a mature position
+     */
+    function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
+        // Check whether there are still 12h to market roll
+        MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
+        if (_activeMarkets[0].maturity.sub(block.timestamp) < 12 * 3_600 
+            && vault.strategies(address(this)).debtRatio == 0
+            && nToken.balanceOf(address(this)) > 0 
+            ) {
+            return true;
+        }
+    } 
 
 }
