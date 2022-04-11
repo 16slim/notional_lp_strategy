@@ -2,7 +2,7 @@ from datetime import timedelta
 from utils import actions, checks, utils
 import pytest
 
-# tests harvesting a strategy that returns profits correctly
+# tests migrating a strategy manually
 def test_force_migration(
     chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
     n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, 
@@ -62,4 +62,81 @@ def test_force_migration(
     # User will withdraw accepting losses
     vault.withdraw(vault.balanceOf(user), user, 10_000, {"from": user})
 
+# tests liquidating a strategy manually
+def test_force_liquidation(
+    chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
+    n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, 
+    million_in_token, note_token, notional_proxy, Strategy, balancer_note_weth_pool
+):
+    # Deposit to the vault
+    actions.user_deposit(user, vault, token, amount)
+    
+    # Harvest 1: Send funds through the strategy
+    chain.sleep(1)
+    strategy.harvest({"from": strategist})
 
+    amount_invested = vault.strategies(strategy)["totalDebt"]
+
+    account = n_proxy_views.getAccount(strategy)
+    amount_tokens = account[1][0][2]
+
+    # Close half the tokens
+    tokens_to_close = int(amount_tokens / 2)
+    strategy.redeemNTokenAmount(tokens_to_close, {"from": gov})
+
+    assert amount_tokens - n_proxy_views.getAccount(strategy)[1][0][2] == tokens_to_close
+
+    # Close the entire position
+    strategy.redeemNTokenAmount(n_proxy_views.getAccount(strategy)[1][0][2], {"from": gov})
+    
+    # Swap all rewards
+    strategy.setToggleClaimRewards(True, {"from":gov})
+    strategy.manuallyClaimAndSellRewards({"from":gov})
+
+    assert n_proxy_views.getAccount(strategy)[1][0][2] == 0
+    assert strategy.getRewardsValue() == 0
+
+    # give it all back to the vault
+    vault.updateStrategyDebtRatio(strategy, 0, {"from":gov})
+    strategy.setToggleLiquidatePosition(True, {"from":gov})
+
+    strategy.harvest({"from":gov})
+
+    assert strategy.estimatedTotalAssets() == 0
+
+    chain.sleep(3600 * 6)  # 6 hrs needed for profits to unlock
+    chain.mine(1)
+    
+    # User will withdraw accepting losses
+    vault.withdraw(vault.balanceOf(user), user, 10_000, {"from": user})
+
+# tests liquidating a strategy in emergency situation
+def test_emergency_exit(
+    chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
+    n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, 
+    million_in_token, note_token, notional_proxy, Strategy, balancer_note_weth_pool
+):
+    # Deposit to the vault
+    actions.user_deposit(user, vault, token, amount)
+    
+    # Harvest 1: Send funds through the strategy
+    chain.sleep(1)
+    strategy.harvest({"from": strategist})
+
+    amount_invested = vault.strategies(strategy)["totalDebt"]
+
+    account = n_proxy_views.getAccount(strategy)
+    amount_tokens = account[1][0][2]
+
+    strategy.setEmergencyExit({"from":gov})
+    strategy.setToggleLiquidatePosition(True, {"from":gov})
+    strategy.setToggleClaimRewards(True, {"from":gov})
+
+    tx = strategy.harvest({"from":gov})
+
+    assert strategy.estimatedTotalAssets() == 0
+
+    chain.mine(1, timedelta = 6 * 3600)
+
+    # User will withdraw accepting losses
+    vault.withdraw(vault.balanceOf(user), user, 10_000, {"from": user})
