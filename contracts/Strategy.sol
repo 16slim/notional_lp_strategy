@@ -54,7 +54,7 @@ contract Strategy is BaseStrategy {
     // NOTE token for rewards
     IERC20 private noteToken;
     // Address of the nToken we interact with
-    nTokenERC20 public nToken;
+    nTokenERC20 private nToken;
     // Balancer pool contract to swap NOTE for WETH
     IBalancerPool private balancerPool;
     // Balancer vault used to swap rewards
@@ -70,11 +70,13 @@ contract Strategy is BaseStrategy {
     // Initialize WETH interface
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // To control when positions should be liquidated 
-    bool internal toggleLiquidatePosition;
+    bool private toggleLiquidatePosition;
     // To control when rewards are claimed 
-    bool internal toggleClaimRewards;
+    bool private toggleClaimRewards;
     // For cloning purposes
     bool private isOriginal = true;
+    // To control whether migrations try to get positions out of notional
+    bool private forceMigration;
     
     // EVENTS
     event Cloned(address indexed clone);
@@ -160,6 +162,9 @@ contract Strategy is BaseStrategy {
 
         // Initialize NOTE token and nToken
         _updateNotionalAddresses();
+
+        // By default try to get positions out of Notional
+        forceMigration = false;
 
         // Check whether the currency is set up right
         if (_currencyID == 1) {
@@ -256,11 +261,29 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
-     *  Getter function for the statevariable defining the original strategy
+     *  Getter function for the toggle defining whether to swap rewards or not
+     * @return bool, current toggleClaimRewards state variable
+     */
+    function getToggleClaimRewards() external view returns(bool) {
+        return toggleClaimRewards;
+    }
+
+    /*
+     * @notice
+     *  Getter function for the state variable defining the original strategy
      * @return bool, current isOriginal state variable
      */
     function getIsOriginal() external view returns(bool) {
         return isOriginal;
+    }
+
+    /*
+     * @notice
+     *  Getter function for the address of the nToken to use
+     * @return address, current nToken state variable
+     */
+    function getNTokenAddress() external view returns(address) {
+        return address(nToken);
     }
 
     /*
@@ -270,6 +293,25 @@ contract Strategy is BaseStrategy {
      */
     function getMinAmountWant() external view returns(uint256) {
         return minAmountWant;
+    }
+
+    /*
+     * @notice
+     *  Getter function for the forceMigration defining whether to try to migrate Notional positions or not
+     * @return bool, current forceMigration state variable
+     */
+    function getForceMigration() external view returns(bool) {
+        return forceMigration;
+    }
+
+    /*
+     * @notice
+     *  Setter function for the forceMigration defining whether to try to migrate Notional positions or not
+     * only accessible to vault managers
+     * @param _newToggle, new booelan value for the toggle
+     */
+    function setForceMigration(bool _forceMigration) external onlyVaultManagers {
+        forceMigration = _forceMigration;
     }
 
     /*
@@ -704,9 +746,32 @@ contract Strategy is BaseStrategy {
                 _claimAndSellRewards();
             }
         }
-        // Transfer nTokens and NOTE incentives (may be necessary to claim them)
-        uint256 nTokenBalance = nToken.balanceOf(address(this));
-        nToken.transfer(_newStrategy, nTokenBalance);
+
+        if(!forceMigration) {
+            // Transfer nTokens and NOTE incentives (may be necessary to claim them)
+            uint256 nTokenBalance = nToken.balanceOf(address(this));
+            _transferNTokens(_newStrategy, nTokenBalance);
+        }
+    }
+
+    /*
+     * @notice
+     *  Exernal function used to manually migrate nTokens tokens to a new strategy
+     * @param newStrategy address where the contract of the new strategy is located
+     * @param amount number of nTokens to migrate
+     */
+    function manuallyTransferNTokens(address newStrategy, uint256 amount) external onlyGovernance {
+        _transferNTokens(newStrategy, amount);
+    }
+
+    /*
+     * @notice
+     *  Internal function used to migrate nTokens tokens to a new strategy
+     * @param _to address where the contract of the new strategy is located
+     * @param _amount number of nTokens to migrate
+     */
+    function _transferNTokens(address _to, uint256 _amount) internal {
+        nToken.transfer(_to, _amount);
     }
 
     /*
@@ -784,42 +849,17 @@ contract Strategy is BaseStrategy {
      * @return uint256 tokensOut, current number of want tokens the strategy would obtain for its rewards
      */
     function _getRewardsValue() internal view returns(uint256 tokensOut) {
-        // Get NOTE rewards
-        uint256 claimableRewards = noteToken.balanceOf(address(this));
-        claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
-        if (claimableRewards > 0) {
-            (IERC20[] memory tokens,
-            uint256[] memory balances,
-            uint256 lastChangeBlock) = balancerVault.getPoolTokens(poolId);
-            // Setup SwapRequest object for balancer
-            IBalancerPool.SwapRequest memory swapRequest = IBalancerPool.SwapRequest(
-                IBalancerPool.SwapKind.GIVEN_IN,
-                tokens[1],
-                tokens[0],
-                claimableRewards,
-                poolId,
-                lastChangeBlock,
-                address(this),
-                address(this),
-                abi.encode(0)
-            );
-            // Simulate NOTE/WETH trade
-            tokensOut = balancerPool.onSwap(
-                swapRequest, 
-                balances[1],
-                balances[0] 
-            );
-            
-            // If want is not weth, simulate sushi trade
-            if(currencyID > 1) {
-                // Sushi path is [weth, want]
-                address[] memory path = new address[](2);
-                path[0] = address(weth);
-                path[1] = address(want);
-                // Get expected number of tokens out
-                tokensOut = router.getAmountsOut(tokensOut, path)[1];
-            }
-        }
+        // Call the view library
+        return NotionalLpLib.getRewardsValue(
+            noteToken,
+            nProxy,
+            balancerVault,
+            poolId,
+            balancerPool,
+            currencyID,
+            router,
+            address(want)
+        );
 
     }
 
