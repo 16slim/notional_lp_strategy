@@ -77,7 +77,6 @@ contract Strategy is BaseStrategy {
     bool private isOriginal = true;
     // To control whether migrations try to get positions out of notional
     bool private forceMigration;
-    
     // EVENTS
     event Cloned(address indexed clone);
 
@@ -664,16 +663,21 @@ contract Strategy is BaseStrategy {
         // liquidate and applying that % to the # of nTokens held
         // NOTE: We do not use estimatedTotalAssets as it includes the value of the rewards
         // instead we use the internal function calculating the value of the nToken position
-        uint256 tokensToRedeem = amountToLiquidate
-            .mul(nProxy.nTokenBalanceOf(_currencyID, address(this)))
+        uint256 nTokenBalance = nToken.balanceOf(address(this));
+        if (nTokenBalance > 0) {
+            // Calculate proportion of nTokens to redeem
+            uint256 tokensToRedeem = amountToLiquidate
+            .mul(nTokenBalance)
             .div(_getNTokenTotalValueFromPortfolio()
                 );
+            // Launch redeem action
+            executeBalanceAction(
+                DepositActionType.RedeemNToken, 
+                tokensToRedeem
+            );
+        }
         
         // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
-        executeBalanceAction(
-            DepositActionType.RedeemNToken, 
-            tokensToRedeem
-        );
 
         // Assess result 
         uint256 totalAssets = balanceOfWant();
