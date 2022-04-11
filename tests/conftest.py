@@ -229,11 +229,7 @@ def strategy(strategist, keeper, vault, rewards, Strategy, gov, \
         currencyID, balancer_vault.address, balancer_note_weth_pool)
     strategy.setKeeper(keeper)
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
-    yield strategy
 
-
-@pytest.fixture
-def cloned_strategy(Strategy, vault, strategy, strategist, rewards, keeper, notional_proxy, currencyID, gov):
     cloned_strategy = strategy.cloneStrategy(
         vault,
         strategist,
@@ -241,13 +237,14 @@ def cloned_strategy(Strategy, vault, strategy, strategist, rewards, keeper, noti
         keeper,
         notional_proxy,
         currencyID,
+        balancer_vault.address, balancer_note_weth_pool,
         {"from": strategist}
     ).return_value
     cloned_strategy = Strategy.at(cloned_strategy)
     vault.revokeStrategy(strategy)
     vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
-    yield cloned_strategy
 
+    yield cloned_strategy
 
 @pytest.fixture(autouse=True)
 def withdraw_no_losses(vault, token, amount, user):
