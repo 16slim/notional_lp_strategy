@@ -73,9 +73,6 @@ contract Strategy is BaseStrategy {
     bool internal toggleLiquidatePosition;
     // To control when rewards are claimed 
     bool internal toggleClaimRewards;
-    
-    uint256 internal constant MAX_UINT = type(uint256).max;
-
     // EVENTS
     event Cloned(address indexed clone);
 
@@ -462,8 +459,10 @@ contract Strategy is BaseStrategy {
             uint256 _debtPayment
         )
     {   
-        // Get all possible rewards to th strategy (in want)
-        _claimAndSellRewards();
+        if (toggleClaimRewards) {
+            // Get all possible rewards to th strategy (in want)
+            _claimAndSellRewards();
+        }
         // We only need profit for decision making
         (_profit, ) = getUnrealisedPL();
 
@@ -479,7 +478,7 @@ contract Strategy is BaseStrategy {
             uint256 amountAvailable = wantBalance;
 
             // If the toggle to realize losses is off, do not close any position
-            if(toggleLiquidatePosition) {
+            if(toggleLiquidatePosition && !NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken))) {
                 (amountAvailable, _loss) = liquidatePosition(amountRequired);
             }
             
