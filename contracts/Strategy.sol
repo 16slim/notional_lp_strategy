@@ -73,6 +73,9 @@ contract Strategy is BaseStrategy {
     bool internal toggleLiquidatePosition;
     // To control when rewards are claimed 
     bool internal toggleClaimRewards;
+    // For cloning purposes
+    bool private isOriginal = true;
+    
     // EVENTS
     event Cloned(address indexed clone);
 
@@ -199,6 +202,7 @@ contract Strategy is BaseStrategy {
         address _balancerVault,
         bytes32 _poolId
     ) external returns (address payable newStrategy) {
+        require(isOriginal, "!clone");
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
         bytes20 addressBytes = bytes20(address(this));
 
@@ -248,6 +252,15 @@ contract Strategy is BaseStrategy {
      */
     function getToggleLiquidatePosition() external view returns(bool) {
         return toggleLiquidatePosition;
+    }
+
+    /*
+     * @notice
+     *  Getter function for the statevariable defining the original strategy
+     * @return bool, current isOriginal state variable
+     */
+    function getIsOriginal() external view returns(bool) {
+        return isOriginal;
     }
 
     /*
