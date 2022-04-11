@@ -38,39 +38,43 @@ def test_idiosyncratic_period(
     chain.mine(1, timestamp = first_market + 1)
     n_proxy_implementation.initializeMarkets(currencyID, False, {"from":accounts[0]})
 
-    # Idiosyncratic situation, no principal position, only rewards
-    rewards_value = strategy.getRewardsValue()
-    assets = strategy.estimatedTotalAssets()
-    check_idiosyncratic = strategy.checkIdiosyncratic()
+    # APplicable for 3-maturities strats (DAI / USDC)
+    if strategy.checkIdiosyncratic():
+        # Idiosyncratic situation, no principal position, only rewards
+        rewards_value = strategy.getRewardsValue()
+        assets = strategy.estimatedTotalAssets()
+        check_idiosyncratic = strategy.checkIdiosyncratic()
 
-    assert assets == rewards_value
-    assert check_idiosyncratic == True
+        assert assets == rewards_value
+        assert check_idiosyncratic == True
 
-    # Balance actions to redeem ntokens are protected as they would revert, nothing happens
-    strategy.redeemNTokenAmount(nTokens_strat, {"from":gov})
-    account = n_proxy_views.getAccount(strategy)
-    assert account["accountBalances"][0][2] == nTokens_strat
+        # Balance actions to redeem ntokens are protected as they would revert, nothing happens
+        strategy.redeemNTokenAmount(nTokens_strat, {"from":gov})
+        account = n_proxy_views.getAccount(strategy)
+        assert account["accountBalances"][0][2] == nTokens_strat
 
-    # Harvesting doesn't do anything (only swapping rewards if we let it)
-    vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-    strategy.setToggleLiquidatePosition(True, {"from": vault.governance()})
-    strategy.setToggleClaimRewards(False, {"from": vault.governance()})
-    tx = strategy.harvest({"from": gov})
-    assert tx.events["Harvested"]["profit"] == 0
-    assert tx.events["Harvested"]["loss"] == 0
-    assert tx.events["Harvested"]["debtPayment"] == 0
+        # Harvesting doesn't do anything (only swapping rewards if we let it)
+        vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
+        strategy.setToggleLiquidatePosition(True, {"from": vault.governance()})
+        strategy.setToggleClaimRewards(False, {"from": vault.governance()})
+        tx = strategy.harvest({"from": gov})
+        assert tx.events["Harvested"]["profit"] == 0
+        assert tx.events["Harvested"]["loss"] == 0
+        assert tx.events["Harvested"]["debtPayment"] == 0
 
-    # strat position remains unchanged
-    account = n_proxy_views.getAccount(strategy)
-    assert account["accountBalances"][0][2] == nTokens_strat
+        # strat position remains unchanged
+        account = n_proxy_views.getAccount(strategy)
+        assert account["accountBalances"][0][2] == nTokens_strat
 
-    # Get a whale to buy the nToken residuals
-    actions.buy_residuals(n_proxy_batch, n_proxy_implementation, currencyID, million_in_token, token, token_whale)
+        # Get a whale to buy the nToken residuals
+        actions.buy_residuals(n_proxy_batch, n_proxy_implementation, currencyID, million_in_token, token, token_whale)
 
     #  Idiosyncratic situation resolved
     assert strategy.checkIdiosyncratic() == False
 
     #  Strategy can now be harvested noramally
+    vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
+    strategy.setToggleLiquidatePosition(True, {"from": vault.governance()})
     strategy.setToggleClaimRewards(True, {"from": vault.governance()})
     tx = strategy.harvest({"from": gov})
     assert tx.events["Harvested"]["profit"] > 0
