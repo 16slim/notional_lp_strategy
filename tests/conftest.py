@@ -244,6 +244,8 @@ def strategy(strategist, keeper, vault, rewards, Strategy, gov, \
     vault.revokeStrategy(strategy)
     vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
 
+    cloned_strategy.setToggleClaimRewards(True, {"from": gov})
+
     yield cloned_strategy
 
 @pytest.fixture(autouse=True)
