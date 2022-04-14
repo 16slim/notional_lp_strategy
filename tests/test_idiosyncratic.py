@@ -56,6 +56,8 @@ def test_avoid_idiosyncratic_period(
         # Harvesting doesn't do anything (only swapping rewards if we let it)
         vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
         strategy.setToggleClaimRewards(False, {"from": vault.governance()})
+        strategy.setDoHealthCheck(False, {"from": gov})
+        
         tx = strategy.harvest({"from": gov})
         assert tx.events["Harvested"]["profit"] == 0
         assert tx.events["Harvested"]["loss"] == 0
@@ -74,6 +76,7 @@ def test_avoid_idiosyncratic_period(
     #  Strategy can now be harvested noramally
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
     strategy.setToggleClaimRewards(True, {"from": vault.governance()})
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({"from": gov})
     assert tx.events["Harvested"]["profit"] > 0
     assert tx.events["Harvested"]["loss"] == 0
@@ -112,13 +115,13 @@ def test_exit_during_idiosyncratic_period(
     tx = strategy.redeemIdiosyncratic(
         nTokens_strat, 
         True, 
-        True, 
+        False, 
         {"from":gov})
     
     account = n_proxy_views.getAccount(strategy)
     
     amount_withdraw = account["accountBalances"][0][1]
-
+    
     assert amount_withdraw > 0
     assert amount_withdraw == tx.return_value[0]
     assert account["accountBalances"][0][2] == 0
@@ -129,6 +132,9 @@ def test_exit_during_idiosyncratic_period(
     assert account["accountBalances"][0][1] == 0
     assert account["accountBalances"][0][2] == 0
 
-    assert token.balanceOf(strategy) > amount
+    vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
+    strategy.setToggleClaimRewards(True, {"from": vault.governance()})
+    strategy.setDoHealthCheck(False, {"from": gov})
+    tx = strategy.harvest({"from": gov})
 
     chain.mine(1, timedelta = 6 * 3600)
