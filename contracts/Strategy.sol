@@ -12,6 +12,7 @@ import "../interfaces/IWETH.sol";
 // 3) Swap and quote rewards to any want
 import "../interfaces/balancer/BalancerV2.sol";
 import "../interfaces/sushi/ISushiRouter.sol";
+import {ISwapRouter} from "../interfaces/uniswap/ISwapRouter.sol";
 
 // 4) Views not fitting in the contract due to bytecode
 import "../libraries/NotionalLpLib.sol";
@@ -65,8 +66,12 @@ contract Strategy is BaseStrategy {
     uint16 private currencyID;
     // minimum amount of want to act on
     uint256 private minAmountWant;
-    // Initialize Sushi router interface to swap WETH for want
-    ISushiRouter private constant router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+    // Initialize Sushi router interface to quote WETH for want
+    ISushiRouter private constant quoter = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+    // Initialize UniV3 router interface to swap WETH for want
+    ISwapRouter private constant uniSwapRouter = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
+    // Swap fee for uni v3 pool
+    uint24 private uniSwapFee;
     // Initialize WETH interface
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // To control when rewards are claimed 
@@ -160,6 +165,7 @@ contract Strategy is BaseStrategy {
 
         // By default try to get positions out of Notional
         forceMigration = false;
+        uniSwapFee = 3000;
 
         // Check whether the currency is set up right
         if (_currencyID == 1) {
@@ -292,6 +298,25 @@ contract Strategy is BaseStrategy {
         return forceMigration;
     }
 
+    /*
+     * @notice
+     *  Getter function for the uniSwapFee defining the uni v3 pool to use
+     * @return bool, current uniSwapFee state variable
+     */
+    function getUniSwapFee() external view returns(uint24) {
+        return uniSwapFee;
+    }
+
+    /*
+     * @notice
+     *  Setter function for the uniSwapFee defining the uni v3 pool to use
+     * only accessible to vault managers
+     * @param _newUniSwapFee, new value for the fee
+     */
+    function setUniSwapFee(uint24 _newUniSwapFee) external onlyVaultManagers {
+        uniSwapFee = _newUniSwapFee;
+    }
+    
     /*
      * @notice
      *  Setter function for the forceMigration defining whether to try to migrate Notional positions or not
@@ -455,20 +480,23 @@ contract Strategy is BaseStrategy {
                 );
             IERC20(address(noteToken)).safeApprove(address(balancerVault), 0);
             if (currencyID > 1) {
-                IERC20(address(weth)).safeApprove(address(router), weth.balanceOf(address(this)));
-                // Path for Sushi is [weth, want]
-                address[] memory path = new address[](2);
-                path[0] = address(weth);
-                path[1] = address(want);
-                // Swap exact tokens
-                router.swapExactTokensForTokens(
-                    weth.balanceOf(address(this)),
-                    0,
-                    path,
-                    address(this),
-                    now
+                IERC20(address(weth)).safeApprove(address(uniSwapRouter), weth.balanceOf(address(this)));
+                
+                uniSwapRouter.exactInput(
+                    ISwapRouter.ExactInputParams(
+                            abi.encodePacked(
+                                address(weth),
+                                uniSwapFee,
+                                address(want)
+                            ),
+                        address(this),
+                        now,
+                        weth.balanceOf(address(this)),
+                        0
+                    )
                 );
-                IERC20(address(weth)).safeApprove(address(router), 0);
+                
+                IERC20(address(weth)).safeApprove(address(uniSwapRouter), 0);
             }
 
         }
@@ -510,7 +538,9 @@ contract Strategy is BaseStrategy {
             // we are not withdrawing 100% of position)
             uint256 amountAvailable = wantBalance;
 
-            (amountAvailable, _loss) = liquidatePosition(amountRequired);
+            if (!NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken))) {
+                (amountAvailable, _loss) = liquidatePosition(amountRequired);
+            }
             
             if(amountAvailable >= amountRequired) {
                 // There are no realisedLosses, debt is paid entirely
@@ -639,21 +669,21 @@ contract Strategy is BaseStrategy {
         // liquidate and applying that % to the # of nTokens held
         // NOTE: We do not use estimatedTotalAssets as it includes the value of the rewards
         // instead we use the internal function calculating the value of the nToken position
-        uint256 nTokenBalance = nToken.balanceOf(address(this));
-        if (nTokenBalance > 0) {
-            // Calculate proportion of nTokens to redeem
-            uint256 tokensToRedeem = amountToLiquidate
-            .mul(nTokenBalance)
-            .div(_getNTokenTotalValueFromPortfolio()
-                );
-            // Launch redeem action
+        uint256 portfolioValue = _getNTokenTotalValueFromPortfolio();
+        uint256 tokensToRedeem = nToken.balanceOf(address(this));
+        if (portfolioValue > 0) {
+            if(portfolioValue > amountToLiquidate) {
+                // Calculate proportion of nTokens to redeem
+                tokensToRedeem = amountToLiquidate
+                .mul(tokensToRedeem)
+                .div(portfolioValue);
+            }
+            // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
             executeBalanceAction(
                 DepositActionType.RedeemNToken, 
                 tokensToRedeem
             );
         }
-        
-        // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
 
         // Assess result 
         uint256 totalAssets = balanceOfWant();
@@ -681,6 +711,16 @@ contract Strategy is BaseStrategy {
                 );
     }
 
+    /*
+     * @notice
+     *  Redeem nTokens in the protection period accepting the discount when converting to 
+     * asset cash - only used manually in case of emergency
+     * @param tokensToRedeem number of tokens to redeem
+     * @param sellTokenAssets Whether to sell the corresponding fcash positions or not
+     * @param acceptResidualAssets Whether to accepot a residual position in the account or not
+     * @return int256 total amount of asset cash redeemed
+     * @return bool if there were residuals that were placed into the portfolio
+     */
     function redeemIdiosyncratic(
         uint96 tokensToRedeem,
         bool sellTokenAssets,
@@ -695,6 +735,14 @@ contract Strategy is BaseStrategy {
             );
     }
 
+    /*
+     * @notice
+     *  Withdraw asset cash in the strategy's account resulting of an nToken redeem during
+     * an idioyncratic period
+     * @param amountInternalPrecision asset cash to redeem (cTokens)
+     * @param redeemToUnderlying wether to receive cTokens or underlying (want)
+     * @return uint256 total amount withdrawn
+     */
     function withdrawFromNotional(
         uint88 amountInternalPrecision,
         bool redeemToUnderlying
@@ -859,7 +907,7 @@ contract Strategy is BaseStrategy {
             poolId,
             balancerPool,
             currencyID,
-            router,
+            quoter,
             address(want)
         );
 
