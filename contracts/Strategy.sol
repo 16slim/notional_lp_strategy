@@ -453,8 +453,7 @@ contract Strategy is BaseStrategy {
      * @notice
      *  Function claiming the pending rewards for the strategy (if any), swap them to WETH in balancer
      * as it's the primary exchange venue for NOTE (only a NOTE / WETH pool available) and if want is not WETH, 
-     * swap the obtained in WETH in Sushi
-     * @return uint256, value containing the current valuation of accumulakted rewards
+     * swap the obtained in WETH in UniV3
      */
     function _claimAndSellRewards() internal {
         uint256 _incentives = noteToken.balanceOf(address(this));
