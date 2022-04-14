@@ -51,7 +51,6 @@ def test_force_migration(
 
     # give it all back to the vault
     vault.updateStrategyDebtRatio(new_strategy, 0, {"from":gov})
-    new_strategy.setToggleLiquidatePosition(True, {"from":gov})
     new_strategy.harvest({"from":gov})
 
     assert new_strategy.estimatedTotalAssets() == 0
@@ -98,7 +97,6 @@ def test_force_liquidation(
 
     # give it all back to the vault
     vault.updateStrategyDebtRatio(strategy, 0, {"from":gov})
-    strategy.setToggleLiquidatePosition(True, {"from":gov})
 
     strategy.harvest({"from":gov})
 
@@ -129,7 +127,6 @@ def test_emergency_exit(
     amount_tokens = account[1][0][2]
 
     strategy.setEmergencyExit({"from":gov})
-    strategy.setToggleLiquidatePosition(True, {"from":gov})
     strategy.setToggleClaimRewards(True, {"from":gov})
 
     tx = strategy.harvest({"from":gov})

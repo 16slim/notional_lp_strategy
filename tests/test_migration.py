@@ -57,7 +57,6 @@ def test_migration(
     assert pytest.approx(new_new_strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == vault.strategies(new_new_strategy)["totalDebt"]
     # create a profitable harvest
     actions.airdrop_amount_rewards(new_new_strategy, 500, note_token, note_whale)
-    new_new_strategy.setToggleLiquidatePosition(True, {"from":gov})
     vault.updateStrategyDebtRatio(new_new_strategy, 0, {"from": gov})
     # check that harvest work as expected
     tx = new_new_strategy.harvest({"from": gov})

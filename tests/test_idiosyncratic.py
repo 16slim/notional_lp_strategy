@@ -55,7 +55,6 @@ def test_idiosyncratic_period(
 
         # Harvesting doesn't do anything (only swapping rewards if we let it)
         vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-        strategy.setToggleLiquidatePosition(True, {"from": vault.governance()})
         strategy.setToggleClaimRewards(False, {"from": vault.governance()})
         tx = strategy.harvest({"from": gov})
         assert tx.events["Harvested"]["profit"] == 0
@@ -74,7 +73,6 @@ def test_idiosyncratic_period(
 
     #  Strategy can now be harvested noramally
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-    strategy.setToggleLiquidatePosition(True, {"from": vault.governance()})
     strategy.setToggleClaimRewards(True, {"from": vault.governance()})
     tx = strategy.harvest({"from": gov})
     assert tx.events["Harvested"]["profit"] > 0

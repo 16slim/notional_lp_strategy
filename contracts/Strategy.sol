@@ -69,8 +69,6 @@ contract Strategy is BaseStrategy {
     ISushiRouter private constant router = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
     // Initialize WETH interface
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-    // To control when positions should be liquidated 
-    bool private toggleLiquidatePosition;
     // To control when rewards are claimed 
     bool private toggleClaimRewards;
     // For cloning purposes
@@ -154,8 +152,6 @@ contract Strategy is BaseStrategy {
 
         (Token memory assetToken, Token memory underlying) = _nProxy.getCurrency(_currencyID);
         
-        // By default do not realize losses
-        toggleLiquidatePosition = false;
         // By default claim rewards
         toggleClaimRewards = false;
 
@@ -251,15 +247,6 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
-     *  Getter function for the toggle defining whether to realize losses or not
-     * @return bool, current toggleRealizeLosses state variable
-     */
-    function getToggleLiquidatePosition() external view returns(bool) {
-        return toggleLiquidatePosition;
-    }
-
-    /*
-     * @notice
      *  Getter function for the toggle defining whether to swap rewards or not
      * @return bool, current toggleClaimRewards state variable
      */
@@ -311,16 +298,6 @@ contract Strategy is BaseStrategy {
      */
     function setForceMigration(bool _forceMigration) external onlyVaultManagers {
         forceMigration = _forceMigration;
-    }
-
-    /*
-     * @notice
-     *  Setter function for the toggle defining whether to liquidate positions or not
-     * only accessible to vault managers
-     * @param _newToggle, new booelan value for the toggle
-     */
-    function setToggleLiquidatePosition(bool _newToggle) external onlyVaultManagers {
-        toggleLiquidatePosition = _newToggle;
     }
     
     /*
@@ -531,10 +508,7 @@ contract Strategy is BaseStrategy {
             // we are not withdrawing 100% of position)
             uint256 amountAvailable = wantBalance;
 
-            // If the toggle to realize losses is off, do not close any position
-            if(toggleLiquidatePosition && !NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken))) {
-                (amountAvailable, _loss) = liquidatePosition(amountRequired);
-            }
+            (amountAvailable, _loss) = liquidatePosition(amountRequired);
             
             if(amountAvailable >= amountRequired) {
                 // There are no realisedLosses, debt is paid entirely
@@ -690,8 +664,6 @@ contract Strategy is BaseStrategy {
             _liquidatedAmount = totalAssets;
         }
 
-        // Re-set the toggle to false
-        toggleLiquidatePosition = false;
     }
     
     /*
