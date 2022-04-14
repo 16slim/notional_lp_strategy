@@ -174,6 +174,8 @@ contract Strategy is BaseStrategy {
         (address balancerPoolAddress,) = balancerVault.getPool(_poolId);
         balancerPool = IBalancerPool(balancerPoolAddress);
 
+        // Set health check to health.ychad.eth
+        healthCheck = 0xDDCea799fF1699e98EDF118e0629A974Df7DF012;
     }
 
     /*

@@ -30,6 +30,7 @@ def test_migration(
     first_assets = strategy.estimatedTotalAssets()
     # migrate to a new strategy both pricipal and rewards
     new_strategy = strategist.deploy(Strategy, vault, notional_proxy, currencyID, strategy.getBalancerVault(), balancer_note_weth_pool)
+    new_strategy.setDoHealthCheck(False, {"from": gov})
     
     vault.migrateStrategy(strategy, new_strategy, {"from": gov})
     mid_assets = new_strategy.estimatedTotalAssets()
@@ -45,6 +46,7 @@ def test_migration(
     # Migrate once again but only principal
     new_new_strategy = strategist.deploy(Strategy, vault, notional_proxy, currencyID, strategy.getBalancerVault(), balancer_note_weth_pool)
     new_strategy.setToggleClaimRewards(False, {"from":gov})
+    new_new_strategy.setDoHealthCheck(False, {"from": gov})
 
     prev_rewards = new_strategy.getRewardsValue()
 

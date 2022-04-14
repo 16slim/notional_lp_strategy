@@ -23,6 +23,7 @@ def test_force_migration(
     # new strategy
     new_strategy = strategist.deploy(Strategy, vault, notional_proxy, currencyID, 
         strategy.getBalancerVault(), balancer_note_weth_pool)
+    new_strategy.setDoHealthCheck(False, {"from": gov})
 
     # migrate nTokens
     strategy.manuallyTransferNTokens(new_strategy, amount_tokens, {"from": gov})
