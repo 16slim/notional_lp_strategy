@@ -12,7 +12,6 @@ import "../interfaces/IWETH.sol";
 // 3) Swap and quote rewards to any want
 import "../interfaces/balancer/BalancerV2.sol";
 import "../interfaces/sushi/ISushiRouter.sol";
-import {ISwapRouter} from "../interfaces/uniswap/ISwapRouter.sol";
 
 // 4) Views not fitting in the contract due to bytecode
 import "../libraries/NotionalLpLib.sol";
@@ -68,10 +67,6 @@ contract Strategy is BaseStrategy {
     uint256 private minAmountWant;
     // Initialize Sushi router interface to quote WETH for want
     ISushiRouter private constant quoter = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
-    // Initialize UniV3 router interface to swap WETH for want
-    ISwapRouter private constant uniSwapRouter = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
-    // Swap fee for uni v3 pool
-    uint24 private uniSwapFee;
     // Initialize WETH interface
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // To control when rewards are claimed 
@@ -165,7 +160,6 @@ contract Strategy is BaseStrategy {
 
         // By default try to get positions out of Notional
         forceMigration = false;
-        uniSwapFee = 3000;
 
         // Check whether the currency is set up right
         if (_currencyID == 1) {
@@ -296,25 +290,6 @@ contract Strategy is BaseStrategy {
      */
     function getForceMigration() external view returns(bool) {
         return forceMigration;
-    }
-
-    /*
-     * @notice
-     *  Getter function for the uniSwapFee defining the uni v3 pool to use
-     * @return bool, current uniSwapFee state variable
-     */
-    function getUniSwapFee() external view returns(uint24) {
-        return uniSwapFee;
-    }
-
-    /*
-     * @notice
-     *  Setter function for the uniSwapFee defining the uni v3 pool to use
-     * only accessible to vault managers
-     * @param _newUniSwapFee, new value for the fee
-     */
-    function setUniSwapFee(uint24 _newUniSwapFee) external onlyVaultManagers {
-        uniSwapFee = _newUniSwapFee;
     }
     
     /*
@@ -451,12 +426,22 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
-     *  Function claiming the pending rewards for the strategy (if any), swap them to WETH in balancer
-     * as it's the primary exchange venue for NOTE (only a NOTE / WETH pool available) and if want is not WETH, 
-     * swap the obtained in WETH in Sushi
+     *  Function claiming the pending rewards for the strategy (if any) to be swapped in yswaps
      * @return uint256, value containing the current valuation of accumulakted rewards
      */
     function _claimAndSellRewards() internal {
+        uint256 _incentives = noteToken.balanceOf(address(this));
+        _incentives += nProxy.nTokenClaimIncentives();
+        
+
+    }
+
+    /*
+     * @notice
+     *  Function claiming the pending rewards for the strategy (if any), swap them to WETH in balancer
+     * as it's the primary exchange venue for NOTE (only a NOTE / WETH pool available)
+     */
+    function swapToWETHManually() external onlyVaultManagers {
         uint256 _incentives = noteToken.balanceOf(address(this));
         _incentives += nProxy.nTokenClaimIncentives();
 
@@ -479,28 +464,7 @@ contract Strategy is BaseStrategy {
                 now
                 );
             IERC20(address(noteToken)).safeApprove(address(balancerVault), 0);
-            if (currencyID > 1) {
-                IERC20(address(weth)).safeApprove(address(uniSwapRouter), weth.balanceOf(address(this)));
-                
-                uniSwapRouter.exactInput(
-                    ISwapRouter.ExactInputParams(
-                            abi.encodePacked(
-                                address(weth),
-                                uniSwapFee,
-                                address(want)
-                            ),
-                        address(this),
-                        now,
-                        weth.balanceOf(address(this)),
-                        0
-                    )
-                );
-                
-                IERC20(address(weth)).safeApprove(address(uniSwapRouter), 0);
-            }
-
         }
-
     }
 
     /*
