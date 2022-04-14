@@ -681,6 +681,30 @@ contract Strategy is BaseStrategy {
                 );
     }
 
+    function redeemIdiosyncratic(
+        uint96 tokensToRedeem,
+        bool sellTokenAssets,
+        bool acceptResidualAssets
+    ) external onlyVaultManagers returns (int256, bool){
+        return nProxy.nTokenRedeem(
+            address(this), 
+            currencyID, 
+            tokensToRedeem, 
+            sellTokenAssets,
+            acceptResidualAssets
+            );
+    }
+
+    function withdrawFromNotional(
+        uint88 amountInternalPrecision,
+        bool redeemToUnderlying
+    ) external onlyVaultManagers returns(uint256) {
+        return nProxy.withdraw(
+            currencyID, 
+            amountInternalPrecision, 
+            redeemToUnderlying);
+    }
+
     /*
      * @notice
      *  Internal function used in emergency to close all active positions and liberate all assets
