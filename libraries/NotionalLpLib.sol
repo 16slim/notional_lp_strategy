@@ -181,7 +181,7 @@ library NotionalLpLib {
      * @param balancerVault, vault address in Balancer to simulate the swap
      * @param poolId, identifier NOTE/weth pool in balancer
      * @param currencyID, identifier of the currency operated in the strategy
-     * @param router, sushi router used to estimate simulate the weth / want trade
+     * @param quoter, sushi router used to estimate simulate the weth / want trade
      * @param want, address of the want token to convert the rewards to
      * @return uint256 tokensOut, current number of want tokens the strategy would obtain for its rewards
      */
@@ -192,7 +192,7 @@ library NotionalLpLib {
         bytes32 poolId,
         IBalancerPool balancerPool,
         uint16 currencyID,
-        ISushiRouter router,
+        ISushiRouter quoter,
         address want
     ) external view returns(uint256 tokensOut) {
         // Get NOTE rewards
@@ -228,7 +228,7 @@ library NotionalLpLib {
                 path[0] = address(weth);
                 path[1] = address(want);
                 // Get expected number of tokens out
-                tokensOut = router.getAmountsOut(tokensOut, path)[1];
+                tokensOut = quoter.getAmountsOut(tokensOut, path)[1];
             }
         }
 
