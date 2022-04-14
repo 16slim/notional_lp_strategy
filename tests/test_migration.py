@@ -60,6 +60,7 @@ def test_migration(
     # create a profitable harvest
     actions.airdrop_amount_rewards(new_new_strategy, 500, note_token, note_whale)
     vault.updateStrategyDebtRatio(new_new_strategy, 0, {"from": gov})
+    new_new_strategy.setToggleClaimRewards(True, {"from":gov})
     # check that harvest work as expected
     tx = new_new_strategy.harvest({"from": gov})
 

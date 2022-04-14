@@ -23,7 +23,6 @@ def test_force_migration(
     # new strategy
     new_strategy = strategist.deploy(Strategy, vault, notional_proxy, currencyID, 
         strategy.getBalancerVault(), balancer_note_weth_pool)
-    new_strategy.setDoHealthCheck(False, {"from": gov})
 
     # migrate nTokens
     strategy.manuallyTransferNTokens(new_strategy, amount_tokens, {"from": gov})
@@ -52,6 +51,9 @@ def test_force_migration(
 
     # give it all back to the vault
     vault.updateStrategyDebtRatio(new_strategy, 0, {"from":gov})
+    new_strategy.setDoHealthCheck(False, {"from": gov})
+    new_strategy.setToggleClaimRewards(True, {"from":gov})
+    
     new_strategy.harvest({"from":gov})
 
     assert new_strategy.estimatedTotalAssets() == 0
@@ -98,7 +100,7 @@ def test_force_liquidation(
 
     # give it all back to the vault
     vault.updateStrategyDebtRatio(strategy, 0, {"from":gov})
-
+    strategy.setDoHealthCheck(False, {"from": gov})
     strategy.harvest({"from":gov})
 
     assert strategy.estimatedTotalAssets() == 0
@@ -129,7 +131,7 @@ def test_emergency_exit(
 
     strategy.setEmergencyExit({"from":gov})
     strategy.setToggleClaimRewards(True, {"from":gov})
-
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({"from":gov})
 
     assert strategy.estimatedTotalAssets() == 0

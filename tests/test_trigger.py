@@ -41,7 +41,7 @@ def test_harvest_trigger(
 
     # No harvest trigger as markets have rolled
     assert strategy.harvestTrigger(1) == False
-
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({"from": strategist})
     
     chain.sleep(3600 * 6)  # 6 hrs needed for profits to unlock

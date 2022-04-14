@@ -29,6 +29,7 @@ def test_profitable_harvest(
 
     chain.mine(1, timedelta=int((first_settlement-chain.time()) / 3))
     assert strategy.estimatedTotalAssets() > amount_invested
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({"from": strategist})
     
     assert tx.events["Harvested"]["profit"] > 0
@@ -36,7 +37,7 @@ def test_profitable_harvest(
     assert tx.events["Harvested"]["debtPayment"] == 0
 
     chain.mine(1, timedelta=int((first_settlement-chain.time()) / 3))
-
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({"from": strategist})
     
     assert tx.events["Harvested"]["profit"] > 0
@@ -50,7 +51,7 @@ def test_profitable_harvest(
     print("Vault assets 1: ", vault.totalAssets())
     
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-    
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx2 = strategy.harvest({"from": gov})
 
     account = n_proxy_views.getAccount(strategy)
@@ -108,6 +109,7 @@ def test_lossy_harvest(
     assert loss > 0
     
     vault.updateStrategyDebtRatio(strategy, 0, {"from":vault.governance()})
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({"from": strategist})
     assert tx.events["Harvested"]["profit"] == 0
     assert tx.events["Harvested"]["loss"] > 0
@@ -167,7 +169,7 @@ def test_choppy_harvest(
         (vault.debtOutstanding({"from":strategy}) - want_balance) \
          / (vault.strategies(strategy)["totalDebt"] - want_balance)
     assert loss_amount > 0
-
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({"from": strategist})
     assert tx.events["Harvested"]["profit"] == 0
     assert tx.events["Harvested"]["loss"] > 0
@@ -209,6 +211,7 @@ def test_choppy_harvest(
     assert profit > 0
 
     vault.updateStrategyDebtRatio(strategy, 0, {"from":vault.governance()})
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({"from": strategist})
     # checks.check_harvest_profit(tx, profit, RELATIVE_APPROX)
 
