@@ -107,8 +107,8 @@ token_addresses = {
     params=[
         # 'WBTC', # WBTC
         # "WETH",  # WETH
-        # 'DAI', # DAI
-        'USDC', # USDC
+        'DAI', # DAI
+        # 'USDC', # USDC
     ],
     scope="session",
     autouse=True,
