@@ -49,4 +49,7 @@ interface nTokenERC20 {
         external
         view
         returns (int256);
+
+    function balanceOf(address owner) external view returns(uint256);
+    function transfer(address to, uint256 amount) external returns(bool);
 } 

@@ -75,6 +75,22 @@ def n_proxy_account(n_proxy):
 def n_proxy_implementation(n_proxy):
     yield interface.NotionalProxy(n_proxy.address)
 
+@pytest.fixture
+def note_token(n_proxy_implementation):
+    yield Contract(n_proxy_implementation.getNoteToken())
+
+@pytest.fixture
+def note_whale():
+    yield "0x22341fB5D92D3d801144aA5A925F401A91418A05"
+
+@pytest.fixture
+def balancer_vault():
+    yield Contract("0xBA12222222228d8Ba445958a75a0704d566BF2C8")
+
+@pytest.fixture
+def balancer_note_weth_pool():
+    yield "0x5f7fa48d765053f8dd85e052843e12d23e3d7bc50002000000000000000000c0"
+
 
 token_addresses = {
     "WBTC": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",  # WBTC
@@ -89,10 +105,10 @@ token_addresses = {
 # TODO: uncomment those tokens you want to test as want
 @pytest.fixture(
     params=[
-        'WBTC', # WBTC
-        "WETH",  # WETH
+        # 'WBTC', # WBTC
+        # "WETH",  # WETH
         'DAI', # DAI
-        'USDC', # USDC
+        # 'USDC', # USDC
     ],
     scope="session",
     autouse=True,
@@ -111,7 +127,7 @@ thresholds = {
     "WETH": (1000e18, -500e8),
     "DAI": (30e24, -30e14),
     "WBTC": (50e8, -50e8),
-    "USDC": (60e12, -60e14),
+    "USDC": (20e12, -20e14),
 }
 
 @pytest.fixture
@@ -126,13 +142,13 @@ def currencyID(token):
 whale_addresses = {
     "WBTC": "0x28c6c06298d514db089934071355e5743bf21d60",
     "WETH": "0x28c6c06298d514db089934071355e5743bf21d60",
-    "LINK": "0x28c6c06298d514db089934071355e5743bf21d60",
-    "YFI": "0x28c6c06298d514db089934071355e5743bf21d60",
-    "USDT": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",
     "USDC": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",
     "DAI": "0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503",
 }
 
+@pytest.fixture
+def token_whales():
+    yield whale_addresses
 
 @pytest.fixture(scope="session", autouse=True)
 def token_whale(token):
@@ -141,7 +157,7 @@ def token_whale(token):
 
 token_prices = {
     "WBTC": 35_000,
-    "WETH": 2_000,
+    "WETH": 3_000,
     "LINK": 20,
     "YFI": 30_000,
     "USDT": 1,
@@ -166,6 +182,10 @@ def amount(token, token_whale, user):
 def million_in_token(token):
     yield round(1e6 / token_prices[token.symbol()]) * 10 ** token.decimals()
 
+@pytest.fixture(autouse=True)
+def million_fcash_notation(million_in_token, token):
+    yield million_in_token / (10 ** token.decimals()) * (10 ** 8)
+
 @pytest.fixture
 def weth():
     token_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
@@ -183,7 +203,7 @@ def weth_amount(user, weth):
 def vault(pm, gov, rewards, guardian, management, token):
     Vault = pm(config["dependencies"][0]).Vault
     vault = guardian.deploy(Vault)
-    vault.initialize(token, gov, rewards, "", "", guardian, management)
+    vault.initialize(token, gov, rewards, "", "", guardian, management, {"from": guardian})
     vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
     vault.setManagement(management, {"from": gov})
     vault.setManagementFee(0, {"from": gov})
@@ -202,16 +222,14 @@ def live_vault(registry, token):
 
 
 @pytest.fixture
-def strategy(strategist, keeper, vault, rewards, Strategy, gov, notional_proxy, currencyID):
-    strategy = strategist.deploy(Strategy, vault, notional_proxy, currencyID)
+def strategy(strategist, keeper, vault, rewards, Strategy, gov, \
+    notional_proxy, currencyID, balancer_vault, balancer_note_weth_pool, NotionalLpLib):
+    notional_lp_lib = strategist.deploy(NotionalLpLib)
+    strategy = strategist.deploy(Strategy, vault, notional_proxy, \
+        currencyID, balancer_vault.address, balancer_note_weth_pool)
     strategy.setKeeper(keeper)
     vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
-    strategy.setMinTimeToMaturity(1 * 30 * 24 * 60 * 60, {"from": vault.governance()})
-    yield strategy
 
-
-@pytest.fixture
-def cloned_strategy(Strategy, vault, strategy, strategist, rewards, keeper, notional_proxy, currencyID, gov):
     cloned_strategy = strategy.cloneStrategy(
         vault,
         strategist,
@@ -219,13 +237,17 @@ def cloned_strategy(Strategy, vault, strategy, strategist, rewards, keeper, noti
         keeper,
         notional_proxy,
         currencyID,
+        balancer_vault.address, balancer_note_weth_pool,
         {"from": strategist}
     ).return_value
     cloned_strategy = Strategy.at(cloned_strategy)
     vault.revokeStrategy(strategy)
     vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
-    yield cloned_strategy
 
+    cloned_strategy.setToggleClaimRewards(True, {"from": gov})
+    cloned_strategy.setDoHealthCheck(False, {"from": gov})
+
+    yield cloned_strategy
 
 @pytest.fixture(autouse=True)
 def withdraw_no_losses(vault, token, amount, user):
@@ -240,7 +262,7 @@ def withdraw_no_losses(vault, token, amount, user):
 
 @pytest.fixture(scope="session", autouse=True)
 def RELATIVE_APPROX():
-    yield 1e-3
+    yield 5e-3
 
 @pytest.fixture(scope="session", autouse=True)
 def MAX_BPS():

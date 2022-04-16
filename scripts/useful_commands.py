@@ -1,66 +1,62 @@
-nProxy_batch.batchBalanceAndTradeAction(accounts[0], \
-        [(2,1,100e18,0,1,1,\
-            [0x000100000000000002198dd90200000000000000000000000000000000000000])], \
-                {"from": accounts[0],\
-                     "value":100e18})
-nProxy_batch.batchBalanceAndTradeAction(whale, \
-        [(2,1,100e24,0,1,1,\
-            [0x0001000000001c7665d2c8120000000000000000000000000000000000000000])], \
-                {"from": whale,\
-                     "value":0})
-nProxy_batch.batchBalanceAndTradeAction(accounts[-1], \
-        [(2,1,1000e18,0,1,1,\
-            [0x0001000000000000174912f60000000000000000000000000000000000000000])], \
-                {"from": accounts[-1],\
-                     "value":1000e18})
+def getLiquidityTokenValue(assetType, notional, markets):
+    index = assetType - 2
+    fCashClaim = markets[index][2] * notional / markets[index][4]
+    assetCashClaim = markets[index][3] * notional / markets[index][4]
+    
+    return (fCashClaim, assetCashClaim)
+
+def getfCashResidualByMaturity(fCash, maturity):
+    for fc in fCash:
+        if fc[1] == maturity:
+            return fc[3]
+    return 0
+
+def getMarketIndexForMaturity(markets, maturity):
+    for (i,m) in enumerate(markets):
+        if m[1] == maturity:
+            return i+1
+    return 0
+
+token.approve(n_proxy_batch.address, 2**255, {"from":user})
+
 n_proxy_batch.batchBalanceAndTradeAction(user, \
-        [(2,2,1e18,0,1,1,\
-            [0x0001000000000000000613747c00000000000000000000000000000000000000])], \
+        [(4,currencyID,1e21,0,1,1,\
+            [])], \
                 {"from": user,\
                      "value":0})
-n_proxy_batch.batchBalanceAndTradeAction(strategy, \
-        [(0,2,0,0,1,1,\
-            [0x010100000000000940385bd7a000000000000000000000000000000000000000])], \
-                {"from": strategy,\
-                     "value":0})
-nProxy_batch.batchBalanceAndTradeAction(whale, \
-        [(0,1,0,0,1,1,\
-            [0x01010000000000000babb17bf800000000000000000000000000000000000000])], \
-                {"from": whale,\
-                     "value":0})
 
-nProxy_batch.batchBalanceAndTradeAction("0x12B1b1d8fF0896303E2C4d319087F5f14A537395", \
-        [(2,1,1e18,0,1,1,\
-            [0x0001000000000000000099323a00000000000000000000000000000000000000])], \
-                {"from": "0x12B1b1d8fF0896303E2C4d319087F5f14A537395",\
-                     "value":1e18})
-accounts.at("0x12B1b1d8fF0896303E2C4d319087F5f14A537395", force=True)
-nProxy_batch.batchBalanceAndTradeAction("0x12B1b1d8fF0896303E2C4d319087F5f14A537395", \
-        [(0,1,0,0,1,1,\
-            [0x01020000000000000005fbf6440209b341000000000000000000000000000000])], \
-                {"from": "0x12B1b1d8fF0896303E2C4d319087F5f14A537395",\
-                     "value":0})
+chain.mine(1, timedelta=30*86400)
+# n_proxy_implementation.initializeMarkets(2, 0, {"from": user})
 
->>> accountJ.balance() - balancePre
-996322199871610067
->>> (accountJ.balance() - balancePre) / 1e18
-0.9963221998716101
->>> ((accountJ.balance() - balancePre) - 999999990000000000)
--3677790128389933
->>> ((accountJ.balance() - balancePre) - 999999990000000000) / 1e18
--0.003677790128389933
-nProxy_views.getCashAmountGivenfCashAmount(1,-100398660,2,chain
-.time()+1)
+nToken = n_proxy_implementation.nTokenAddress(2)
+totalSupply = n_proxy_implementation.nTokenTotalSupply(nToken)
+(liquidityTokens, fCash) = n_proxy_implementation.getNTokenPortfolio(nToken)
+cashBalanceToken = n_proxy_views.getNTokenAccount(nToken)["cashBalance"]
+nTokens = n_proxy_views.getAccount(user)["accountBalances"][0][2]
+assert nTokens > 0
+cashBalanceShare = cashBalanceToken * nTokens / totalSupply
+markets = n_proxy_views.getActiveMarkets(currencyID)
+
+totalAssetCash = 0
+for (i, lt) in enumerate(liquidityTokens):
+    (fCashClaim, assetCashClaim) = getLiquidityTokenValue(lt[2], lt[3], markets)
+    netfCash = fCashClaim + getfCashResidualByMaturity(fCash, lt[1])
+    netfCashShare = nTokens * netfCash / totalSupply
+    assetCashShare = nTokens * assetCashClaim / totalSupply
+
+    if netfCashShare != 0:
+        mIndex = getMarketIndexForMaturity(markets, lt[1])
+        netCashToAccount = n_proxy_views.getCashAmountGivenfCashAmount(currencyID, -netfCashShare, mIndex, chain.time())
+        netAssetCashShare = netCashToAccount[0]
+        totalAssetCash += netAssetCashShare
+
+    totalAssetCash += assetCashShare
+
+n_proxy_implementation.nTokenRedeem(user, 2, nTokens, 1, {"from": user})
+
+n_proxy_batch.batchBalanceAction(strategy, \
+[(5,currencyID,nTokens,0,1,1)], \
+        {"from": strategy,\
+            "value":0})
 
 
-
-n_proxy_batch.batchBalanceAndTradeAction(usdcWhale, \
-        [(2,3,100000e6,0,0,0,\
-            [trade])], \
-                {"from": usdcWhale,\
-                     "value":0})
-n_proxy_batch.batchBalanceAndTradeAction(accounts[0], \
-        [(0,3,0,0,1,1,\
-            [trade])], \
-                {"from": accounts[0],\
-                     "value":0})

@@ -6,9 +6,16 @@ pragma experimental ABIEncoderV2;
 // Necessary interfaces to:
 // 1) interact with the Notional protocol
 import "../interfaces/notional/NotionalProxy.sol";
+import "../interfaces/notional/nTokenERC20.sol";
 // 2) Transact between WETH (Vault) and ETH (Notional)
 import "../interfaces/IWETH.sol";
+// 3) Swap and quote rewards to any want
+import "../interfaces/balancer/BalancerV2.sol";
+import "../interfaces/sushi/ISushiRouter.sol";
+import {ISwapRouter} from "../interfaces/uniswap/ISwapRouter.sol";
 
+// 4) Views not fitting in the contract due to bytecode
+import "../libraries/NotionalLpLib.sol";
 
 // These are the core Yearn libraries
 import {
@@ -36,7 +43,7 @@ import {
 
 /*
      * @notice
-     *  Yearn Strategy allocating vault's funds to a fixed rate lending market within the Notional protocol
+     *  Yearn Strategy allocating vault's funds to an LP position funding Notional's fixed rate lend and borrow markets
 */
 contract Strategy is BaseStrategy {
     using SafeERC20 for IERC20;
@@ -45,27 +52,34 @@ contract Strategy is BaseStrategy {
 
     // NotionalContract: proxy that points to a router with different implementations depending on function 
     NotionalProxy public nProxy;
+    // NOTE token for rewards
+    IERC20 private noteToken;
+    // Address of the nToken we interact with
+    nTokenERC20 private nToken;
+    // Balancer pool contract to swap NOTE for WETH
+    IBalancerPool private balancerPool;
+    // Balancer vault used to swap rewards
+    IBalancerVault private balancerVault;
+    // Id of the balancer NOTE/WETH pool to use
+    bytes32 private poolId;
     // ID of the asset being lent in Notional
-    uint16 public currencyID; 
-    // Difference of decimals between Notional system (8) and want
-    uint256 public DECIMALS_DIFFERENCE;
-    // Scaling factor for entering positions as the fcash estimations have rounding errors
-    uint256 internal constant FCASH_SCALING = 9_995;
-    // minimum maturity for the market to enter
-    uint256 private minTimeToMaturity;
+    uint16 private currencyID;
     // minimum amount of want to act on
-    uint16 public minAmountWant;
+    uint256 private minAmountWant;
+    // Initialize Sushi router interface to quote WETH for want
+    ISushiRouter private constant quoter = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+    // Initialize UniV3 router interface to swap WETH for want
+    ISwapRouter private constant uniSwapRouter = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
+    // Swap fee for uni v3 pool
+    uint24 private uniSwapFee;
     // Initialize WETH interface
-    IWETH public constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-    // Constant necessary to accept ERC1155 fcash tokens (for migration purposes) 
-    bytes4 internal constant ERC1155_ACCEPTED = bytes4(keccak256("onERC1155Received(address,address,uint256,uint256,bytes)"));
-    // To control when positions should be liquidated before maturity or not (and thus incur in losses)
-    bool internal toggleRealizeLosses;
-    // Base for percentage calculations. BPS (10000 = 100%, 100 = 1%)
-    uint256 private constant MAX_BPS = 10_000;
-    // Current maturity invested
-    uint256 private maturity;
-
+    IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    // To control when rewards are claimed 
+    bool private toggleClaimRewards;
+    // For cloning purposes
+    bool private isOriginal = true;
+    // To control whether migrations try to get positions out of notional
+    bool private forceMigration;
     // EVENTS
     event Cloned(address indexed clone);
 
@@ -79,13 +93,17 @@ contract Strategy is BaseStrategy {
      * 2 - DAI
      * 3 - USDC
      * 4 - WBTC
+     * @param _balancerVault Address of the balancer vault to use to exchange NOTEs to WETH
+     * @param _poolId 32 bytes identifier of the NOTE/WETH balancer pool to use
      */
     constructor(
         address _vault,
         NotionalProxy _nProxy,
-        uint16 _currencyID    
+        uint16 _currencyID,
+        address _balancerVault,
+        bytes32 _poolId 
     ) public BaseStrategy (_vault) {
-        _initializeNotionalStrategy(_nProxy, _currencyID);
+        _initializeNotionalStrategy(_nProxy, _currencyID, _balancerVault, _poolId);
     }
 
     /*
@@ -100,6 +118,8 @@ contract Strategy is BaseStrategy {
      * 2 - DAI
      * 3 - USDC
      * 4 - WBTC
+     * @param _balancerVault Address of the balancer vault to use to exchange NOTEs to WETH
+     * @param _poolId 32 bytes identifier of the NOTE/WETH balancer pool to use
      */
     function initialize(
         address _vault,
@@ -107,10 +127,12 @@ contract Strategy is BaseStrategy {
         address _rewards,
         address _keeper,
         NotionalProxy _nProxy,
-        uint16 _currencyID
+        uint16 _currencyID,
+        address _balancerVault,
+        bytes32 _poolId
     ) external {
         _initialize(_vault, _strategist, _rewards, _keeper);
-        _initializeNotionalStrategy(_nProxy, _currencyID);
+        _initializeNotionalStrategy(_nProxy, _currencyID, _balancerVault, _poolId);
     }
 
     /*
@@ -121,19 +143,29 @@ contract Strategy is BaseStrategy {
      * 2 - DAI
      * 3 - USDC
      * 4 - WBTC
+     * @param _balancerVault Address of the balancer vault to use to exchange NOTEs to WETH
+     * @param _poolId 32 bytes identifier of the NOTE/WETH balancer pool to use
      */
     function _initializeNotionalStrategy (
         NotionalProxy _nProxy,
-        uint16 _currencyID
+        uint16 _currencyID,
+        address _balancerVault,
+        bytes32 _poolId
     ) internal {
         currencyID = _currencyID;
         nProxy = _nProxy;
 
         (Token memory assetToken, Token memory underlying) = _nProxy.getCurrency(_currencyID);
-        DECIMALS_DIFFERENCE = uint256(underlying.decimals).mul(MAX_BPS).div(uint256(assetToken.decimals));
         
-        // By default do not realize losses
-        toggleRealizeLosses = false;
+        // By default claim rewards
+        toggleClaimRewards = false;
+
+        // Initialize NOTE token and nToken
+        _updateNotionalAddresses();
+
+        // By default try to get positions out of Notional
+        forceMigration = false;
+        uniSwapFee = 3000;
 
         // Check whether the currency is set up right
         if (_currencyID == 1) {
@@ -141,6 +173,15 @@ contract Strategy is BaseStrategy {
         } else {
             require(address(want) == underlying.tokenAddress);
         }
+
+        // Balancer setup
+        balancerVault = IBalancerVault(_balancerVault);
+        poolId = _poolId;
+        (address balancerPoolAddress,) = balancerVault.getPool(_poolId);
+        balancerPool = IBalancerPool(balancerPoolAddress);
+
+        // Set health check to health.ychad.eth
+        healthCheck = 0xDDCea799fF1699e98EDF118e0629A974Df7DF012;
     }
 
     /*
@@ -156,6 +197,8 @@ contract Strategy is BaseStrategy {
      * 2 - DAI
      * 3 - USDC
      * 4 - WBTC
+     * @param _balancerVault Address of the balancer vault to use to exchange NOTEs to WETH
+     * @param _poolId 32 bytes identifier of the NOTE/WETH balancer pool to use
      */
     function cloneStrategy(
         address _vault,
@@ -163,8 +206,11 @@ contract Strategy is BaseStrategy {
         address _rewards,
         address _keeper,
         NotionalProxy _nProxy,
-        uint16 _currencyID
+        uint16 _currencyID,
+        address _balancerVault,
+        bytes32 _poolId
     ) external returns (address payable newStrategy) {
+        require(isOriginal, "!clone");
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
         bytes20 addressBytes = bytes20(address(this));
 
@@ -177,7 +223,10 @@ contract Strategy is BaseStrategy {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        Strategy(newStrategy).initialize(_vault, _strategist, _rewards, _keeper, _nProxy, _currencyID);
+        Strategy(newStrategy).initialize(_vault, 
+            _strategist, _rewards, _keeper, _nProxy, _currencyID,
+            _balancerVault, _poolId
+            );
 
         emit Cloned(newStrategy);
     }
@@ -201,78 +250,256 @@ contract Strategy is BaseStrategy {
      */
     function name() external view override returns (string memory) {
         // Add your own name here, suggestion e.g. "StrategyCreamYFI"
-        return "StrategyNotionalLending";
+        return "StrategyNotionalLp";
+    }
+
+    /*
+     * @notice
+     *  Getter function for the toggle defining whether to swap rewards or not
+     * @return bool, current toggleClaimRewards state variable
+     */
+    function getToggleClaimRewards() external view returns(bool) {
+        return toggleClaimRewards;
+    }
+
+    /*
+     * @notice
+     *  Getter function for the state variable defining the original strategy
+     * @return bool, current isOriginal state variable
+     */
+    function getIsOriginal() external view returns(bool) {
+        return isOriginal;
+    }
+
+    /*
+     * @notice
+     *  Getter function for the address of the nToken to use
+     * @return address, current nToken state variable
+     */
+    function getNTokenAddress() external view returns(address) {
+        return address(nToken);
+    }
+
+    /*
+     * @notice
+     *  Getter function for the current minimum amount of want required to enter a position
+     * @return uint256, current minAmountWant state variable
+     */
+    function getMinAmountWant() external view returns(uint256) {
+        return minAmountWant;
+    }
+
+    /*
+     * @notice
+     *  Getter function for the forceMigration defining whether to try to migrate Notional positions or not
+     * @return bool, current forceMigration state variable
+     */
+    function getForceMigration() external view returns(bool) {
+        return forceMigration;
+    }
+
+    /*
+     * @notice
+     *  Getter function for the uniSwapFee defining the uni v3 pool to use
+     * @return bool, current uniSwapFee state variable
+     */
+    function getUniSwapFee() external view returns(uint24) {
+        return uniSwapFee;
+    }
+
+    /*
+     * @notice
+     *  Setter function for the uniSwapFee defining the uni v3 pool to use
+     * only accessible to vault managers
+     * @param _newUniSwapFee, new value for the fee
+     */
+    function setUniSwapFee(uint24 _newUniSwapFee) external onlyVaultManagers {
+        uniSwapFee = _newUniSwapFee;
     }
     
     /*
      * @notice
-     *  Getter function for the current invested maturity
-     * @return uint256, current maturity we are invested in
-     */
-    function getMaturity() external view returns(uint256) {
-        return maturity;
-    }
-
-    /*
-     * @notice
-     *  Getter function for the toggle defining whether to realize losses or not
-     * @return bool, current toggleRealizeLosses state variable
-     */
-    function getToggleRealizeLosses() external view returns(bool) {
-        return toggleRealizeLosses;
-    }
-
-    /*
-     * @notice
-     *  Setter function for the toggle defining whether to realize losses or not
-     * only accessible to strategist, governance, guardian and management
+     *  Setter function for the forceMigration defining whether to try to migrate Notional positions or not
+     * only accessible to vault managers
      * @param _newToggle, new booelan value for the toggle
      */
-    function setToggleRealizeLosses(bool _newToggle) external onlyEmergencyAuthorized {
-        toggleRealizeLosses = _newToggle;
+    function setForceMigration(bool _forceMigration) external onlyVaultManagers {
+        forceMigration = _forceMigration;
     }
     
     /*
      * @notice
-     *  Getter function for the minimum time to maturity to invest into
-     * @return uint256, current minTimeToMaturity state variable
+     *  Setter function for the toggle defining whether to claim rewards or not
+     * only accessible to vault managers
+     * @param _newToggle, new booelan value for the toggle
      */
-    function getMinTimeToMaturity() external view returns(uint256) {
-        return minTimeToMaturity;
+    function setToggleClaimRewards(bool _newToggle) external onlyVaultManagers {
+        toggleClaimRewards = _newToggle;
     }
 
     /*
      * @notice
-     *  Setter function for the minimum time to maturity to invest into, accesible only to strategist, governance, guardian and management
-     * @param _newTime, new minimum time to maturity to invest into
-     */
-    function setMinTimeToMaturity(uint256 _newTime) external onlyEmergencyAuthorized {
-        minTimeToMaturity = _newTime;
-    }
-
-    /*
-     * @notice
-     *  Setter function for the minimum amount of want to invest, accesible only to strategist, governance, guardian and management
+     *  Setter function for the minimum amount of want to invest, accesible only to vault managers
      * @param _newMinAmount, new minimum amount of want to invest
      */
-    function setMinAmountWant(uint16 _newMinAmount) external onlyEmergencyAuthorized {
+    function setMinAmountWant(uint256 _newMinAmount) external onlyVaultManagers {
         minAmountWant = _newMinAmount;
     }
 
     /*
      * @notice
+     *  Getter function for the current balancer vault used to swap NOTE rewards
+     * @return address, current balancerVault state variable
+     */
+    function getBalancerVault() external view returns (address) {
+        return address(balancerVault);
+    }
+
+    /*
+     * @notice
+     *  Getter function for the current balancer NOTE/WETH pool is used to swap NOTE rewards
+     * @return address, current balancerPool state variable
+     */
+    function getBalancerPool() external view returns (address) {
+        return address(balancerPool);
+    }
+
+    /*
+     * @notice
+     *  Getter function for the current currency ID of the strategy, following Notional's convention:
+     * 1 - ETH
+     * 2 - DAI
+     * 3 - USDC
+     * 4 - WBTC
+     * @return uint16, current currencyID state variable
+     */
+    function getCurrencyID() external view returns (uint16) {
+        return currencyID;
+    }
+
+    /*
+     * @notice
+     *  Getter function for the current value of NOTE rewards earned and pending of to be claimed, in want tokens exchanged in Sushi
+     * @return uint256, current value of strategy's rewards
+     */
+    function getRewardsValue() external view returns (uint256) {
+        return _getRewardsValue();
+    }
+
+    /*
+     * @notice
+     *  Setter function for the balancer vault ot use
+     * @param _newVault, new address of the balancer vault to use
+     */
+    function setBalancerVault(address _newVault) external onlyGovernance {
+        balancerVault = IBalancerVault(_newVault);
+    }
+
+    /*
+     * @notice
+     *  Setter function for the balancer NOTE/WETH pool id to use
+     * @param _newPoolId, new pool id to use
+     */
+    function setBalancerPool(bytes32 _newPoolId) external onlyVaultManagers {
+        (address balancerPoolAddress,) = balancerVault.getPool(_newPoolId);
+        balancerPool = IBalancerPool(balancerPoolAddress);
+    }
+
+    /*
+     * @notice
+     *  Internal function to refresh NOTE and NToken addresses in the initializer and the external setter
+     */
+    function _updateNotionalAddresses() internal {
+        // Initialize NOTE token and nToken
+        noteToken = IERC20(nProxy.getNoteToken());
+        nToken = nTokenERC20(nProxy.nTokenAddress(currencyID));
+    }
+
+    /*
+     * @notice
+     *  External function to update the NOTE and nToken addresses after deployment
+     */
+    function updateNotionalAddresses() external onlyVaultManagers {
+        _updateNotionalAddresses();
+    }
+
+    /*
+     * @notice
      *  Function estimating the total assets under management of the strategy, whether realized (token balances
-     * of the contract) or unrealized (as Notional lending positions)
+     * of the contract) or unrealized (as Notional LP positions and/or NOTE rewards)
      * @return uint256, value containing the total AUM valuation
      */
     function estimatedTotalAssets() public view override returns (uint256) {
         // To estimate the assets under management of the strategy we add the want balance already 
-        // in the contract and the current valuation of the matured and non-matured positions (including the cost of)
-        // closing the position early
+        // in the contract and the current valuation of share of nTokens held by the strategy and the 
+        // tokens we would get by exchanging the accumulated rewards to want tokens
 
         return balanceOfWant()
-            .add(_getTotalValueFromPortfolio())
+            .add(_getNTokenTotalValueFromPortfolio())
+            .add(_getRewardsValue())
         ;
+    }
+
+    /*
+     * @notice
+     *  View reutning whether or not the nToken has an idiosyncratic position
+     * @return bool, value containing if there is an idiosyncratic position or not
+     */
+    function checkIdiosyncratic() external view returns(bool){
+        return NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken));
+    }
+
+    /*
+     * @notice
+     *  Function claiming the pending rewards for the strategy (if any), swap them to WETH in balancer
+     * as it's the primary exchange venue for NOTE (only a NOTE / WETH pool available) and if want is not WETH, 
+     * swap the obtained in WETH in UniV3
+     */
+    function _claimAndSellRewards() internal {
+        uint256 _incentives = noteToken.balanceOf(address(this));
+        _incentives += nProxy.nTokenClaimIncentives();
+
+        if (_incentives > 0) {
+            // Create the NOTE/WETH swap object for balancer
+            IBalancerVault.SingleSwap memory swap = IBalancerVault.SingleSwap(
+                poolId,
+                IBalancerVault.SwapKind.GIVEN_IN,
+                IAsset(address(noteToken)),
+                IAsset(address(weth)),
+                _incentives,
+                abi.encode(0)
+            );
+            IERC20(address(noteToken)).safeApprove(address(balancerVault), _incentives);
+             // Swap the NOTE tokens to WETH
+            balancerVault.swap(
+                swap, 
+                IBalancerVault.FundManagement(address(this), false, address(this), false),
+                _incentives, 
+                now
+                );
+            IERC20(address(noteToken)).safeApprove(address(balancerVault), 0);
+            if (currencyID > 1) {
+                IERC20(address(weth)).safeApprove(address(uniSwapRouter), weth.balanceOf(address(this)));
+                
+                uniSwapRouter.exactInput(
+                    ISwapRouter.ExactInputParams(
+                            abi.encodePacked(
+                                address(weth),
+                                uniSwapFee,
+                                address(want)
+                            ),
+                        address(this),
+                        now,
+                        weth.balanceOf(address(this)),
+                        0
+                    )
+                );
+                
+                IERC20(address(weth)).safeApprove(address(uniSwapRouter), 0);
+            }
+
+        }
+
     }
 
     /*
@@ -291,159 +518,92 @@ contract Strategy is BaseStrategy {
             uint256 _loss,
             uint256 _debtPayment
         )
-    {
-        // Withdraw from terms that already matured
-        _checkPositionsAndWithdraw();
-
+    {   
+        if (toggleClaimRewards) {
+            // Get all possible rewards to th strategy (in want)
+            _claimAndSellRewards();
+        }
         // We only need profit for decision making
         (_profit, ) = getUnrealisedPL();
+
         // free funds to repay debt + profit to the strategy
         uint256 wantBalance = balanceOfWant();
         
-        // If we cannot realize the profit using want balance, don't report a profit to avoid
-        // closing active positions before maturity
-        if (_profit > wantBalance) {
-            _profit = 0;
-        }
         uint256 amountRequired = _debtOutstanding.add(_profit);
         if(amountRequired > wantBalance) {
             // we need to free funds
             // NOTE: liquidatePosition will try to use balanceOfWant first
             // liquidatePosition will realise Losses if required !! (which cannot be equal to unrealised losses if
             // we are not withdrawing 100% of position)
-            uint256 amountAvailable = 0;
-            uint256 realisedLoss = 0;
+            uint256 amountAvailable = wantBalance;
 
-            // If the toggle to realize losses is off, do not close any position
-            if(toggleRealizeLosses) {
-                (amountAvailable, realisedLoss) = liquidatePosition(amountRequired);
+            if (!NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken))) {
+                (amountAvailable, _loss) = liquidatePosition(amountRequired);
             }
-            _loss = realisedLoss;
             
             if(amountAvailable >= amountRequired) {
+                // There are no realisedLosses, debt is paid entirely
                 _debtPayment = _debtOutstanding;
-                // profit remains unchanged unless there is not enough to pay it
-                if(amountRequired.sub(_debtPayment) < _profit) {
-                    _profit = amountRequired.sub(_debtPayment);
-                }
+                // In case we liberate a higher amount than needed (liquidatePosition uses the estimation of
+                // the value in the portfolio + performs a proportion), we avoid declaring as profit
+                // part of the principal position
+                _profit = Math.min(amountAvailable.sub(_debtOutstanding), amountRequired.sub(_debtPayment));
             } else {
                 // we were not able to free enough funds
                 if(amountAvailable < _debtOutstanding) {
                     // available funds are lower than the repayment that we need to do
                     _profit = 0;
                     _debtPayment = amountAvailable;
-                    // we dont report losses here as the strategy might not be able to return in this harvest
-                    // but it will still be there for the next harvest
+                    // loss amount is not calculated here as it comes from the liquidate position assessment
+                    // if the toggle was set positions are freed if not, but it could be done in the next harvest
                 } else {
                     // NOTE: amountRequired is always equal or greater than _debtOutstanding
                     // important to use amountRequired just in case amountAvailable is > amountAvailable
+                    // We will not report and losses but pay the entire debtOutstanding and report the rest of
+                    // amountAvailable as profit (therefore losses are 0 because we were able to pay debtPayment)
                     _debtPayment = _debtOutstanding;
                     _profit = amountAvailable.sub(_debtPayment);
+                    _loss = 0;
                 }
             }
         } else {
             _debtPayment = _debtOutstanding;
-            // profit remains unchanged unless there is not enough to pay it
-            if(amountRequired.sub(_debtPayment) < _profit) {
-                _profit = amountRequired.sub(_debtPayment);
-            }
         }
     }
 
     /*
      * @notice
      * Function re-allocating the available funds (present in the strategy's balance in the 'want' token)
-     * into new positions in Notional
+     * into new LP positions in Notional
      * @param _debtOutstanding, Debt still left to pay to the vault
      */
     function adjustPosition(uint256 _debtOutstanding) internal override {
+        // Available balance
         uint256 availableWantBalance = balanceOfWant();
         
+        // If there is more debt, don't do anything
         if(availableWantBalance <= _debtOutstanding) {
             return;
         }
         availableWantBalance = availableWantBalance.sub(_debtOutstanding);
+        // Check if we have the minimum required
         if(availableWantBalance < minAmountWant) {
             return;
         }
         
-        // gas savings
-        uint16 _currencyID = currencyID;
-        uint256 _maturity = maturity;
-
-        // Use the market index with the shortest maturity
-        (uint256 minMarketIndex, uint256 minMarketMaturity) = _getMinimumMarketIndex();
-        // If the new position enters a different market than the current maturity, roll the current position into
-        // the next maturity market
-        if(minMarketMaturity > _maturity && _maturity > 0) {
-            availableWantBalance += _rollOverTrade(_maturity);
-        }
-
-        if (_currencyID == 1) {
+        if (currencyID == 1) {
             // Only necessary for wETH/ ETH pair
             weth.withdraw(availableWantBalance);
         } else {
-            want.approve(address(nProxy), availableWantBalance);
-        }
-        // Amount to trade is the available want balance, changed to 8 decimals and
-        // scaled down by FCASH_SCALING to ensure it does not revert
-        int88 amountTrade = int88(
-                availableWantBalance.mul(MAX_BPS).div(DECIMALS_DIFFERENCE).mul(FCASH_SCALING).div(MAX_BPS)
-            );
-        // NOTE: May revert if the availableWantBalance is too high and interest rates get to < 0
-        int256 fCashAmountToTrade = nProxy.getfCashAmountGivenCashAmount(
-            _currencyID, 
-            -amountTrade, 
-            minMarketIndex, 
-            block.timestamp
-            );
-
-        if (fCashAmountToTrade <= 0) {
-            return;
+            want.safeApprove(address(nProxy), availableWantBalance);
         }
 
-        // Trade the shortest maturity market with at least minAmountToMaturity time left
-        bytes32[] memory trades = new bytes32[](1);
-        trades[0] = getTradeFrom(
-            0, 
-            minMarketIndex, 
-            uint256(fCashAmountToTrade)
-            );
-
-        executeBalanceActionWithTrades(
-            DepositActionType.DepositUnderlying,
-            availableWantBalance,
-            0, 
-            true,
-            true,
-            trades
+        // Deposit all and mint all possible nTokens
+        executeBalanceAction(
+            DepositActionType.DepositUnderlyingAndMintNToken,
+            availableWantBalance
         );
 
-        maturity = minMarketMaturity;
-    }
-
-    /*
-     * @notice
-     *  Internal function encoding a trade parameter into a bytes32 variable needed for Notional
-     * @param _tradeType, Identification of the trade to perform, following the Notional classification in enum 'TradeActionType'
-     * @param _marketIndex, Market index in which to trade into
-     * @param _amount, fCash amount to trade
-     * @return bytes32 result, the encoded trade ready to be used in Notional's 'BatchTradeAction'
-     */
-    function getTradeFrom(uint8 _tradeType, uint256 _marketIndex, uint256 _amount) internal returns (bytes32 result) {
-        uint8 tradeType = uint8(_tradeType);
-        uint8 marketIndex = uint8(_marketIndex);
-        uint88 fCashAmount = uint88(_amount);
-        uint32 minSlippage = uint32(0);
-        uint120 padding = uint120(0);
-
-        // We create result of trade in a bitmap packed encoded bytes32
-        result = bytes32(uint(tradeType)) << 248;
-        result |= bytes32(uint(marketIndex) << 240);
-        result |= bytes32(uint(fCashAmount) << 152);
-        result |= bytes32(uint(minSlippage) << 120);
-
-        return result;
     }
     
     /*
@@ -481,20 +641,16 @@ contract Strategy is BaseStrategy {
         override
         returns (uint256 _liquidatedAmount, uint256 _loss)
     {
-        _checkPositionsAndWithdraw();
-
+        // If enough want balance can repay the debt, do it
         uint256 wantBalance = balanceOfWant();
         if (wantBalance >= _amountNeeded) {
             return (_amountNeeded, 0);
         }
-        
         // Get current position's P&L
         (, uint256 unrealisedLosses) = getUnrealisedPL();
-        // We only need to withdraw what we don't currently have
+        // We only need to withdraw what we don't currently have in want
         uint256 amountToLiquidate = _amountNeeded.sub(wantBalance);
         
-        // Losses are realised IFF we withdraw from the position, as they will come from breaking our "promise"
-        // of lending at a certain %
         // The strategy will only realise losses proportional to the amount we are liquidating
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
         uint256 lossesToBeRealised = unrealisedLosses.mul(amountToLiquidate).div(totalDebt.sub(wantBalance));
@@ -502,76 +658,31 @@ contract Strategy is BaseStrategy {
         // Due to how Notional works, we need to substract losses from the amount to liquidate
         // If we don't do this and withdraw a small enough % of position, we will not incur in losses,
         // leaving them for the future withdrawals (which is bad! those who withdraw should take the losses)
+        
         amountToLiquidate = amountToLiquidate.sub(lossesToBeRealised);
-
-        // Retrieve info of portfolio (summary of our position/s)
-        PortfolioAsset[] memory _accountPortfolio = nProxy.getAccountPortfolio(address(this));
-        // The maximum amount of trades we are doing is the number of terms (aka markets) we are in
-        bytes32[] memory trades = new bytes32[](_accountPortfolio.length);
-
-        // To liquidate the full required amount we may need to liquidate several differents terms
-        // This shouldn't happen in the basic strategy (as we will only lend to the shortest term)
-        uint256 remainingAmount = amountToLiquidate;
-        // The following for-loop creates the list of required trades to get the amountRequired
-        uint256 tradesToExecute = 0;
-        for(uint256 i; i < _accountPortfolio.length; i++) {
-            if (remainingAmount > 0) {
-                uint256 _marketIndex = _getMarketIndexForMaturity(
-                    _accountPortfolio[i].maturity
-                );
-                // Retrieve size of position in this market (underlyingInternalNotation)
-                (, int256 underlyingInternalNotation) = nProxy.getCashAmountGivenfCashAmount(
-                    currencyID,
-                    int88(-_accountPortfolio[i].notional),
-                    _marketIndex,
-                    block.timestamp
-                );
-                // Adjust for decimals (Notional uses 8 decimals regardless of underlying)
-                uint256 underlyingPosition = uint256(underlyingInternalNotation).mul(DECIMALS_DIFFERENCE).div(MAX_BPS);
-                // If we can withdraw what we need from this market, we do and stop iterating over markets
-                // If we can't, we create the trade to withdraw maximum amount and try in the next market / term
-                if(underlyingPosition > remainingAmount) {
-                    
-                    int256 fCashAmountToTrade = -nProxy.getfCashAmountGivenCashAmount(
-                        currencyID, 
-                        int88(remainingAmount.mul(MAX_BPS).div(DECIMALS_DIFFERENCE)) + 1, 
-                        _marketIndex, 
-                        block.timestamp
-                        );
-                    trades[i] = getTradeFrom(1, _marketIndex, 
-                                            uint256(fCashAmountToTrade)
-                                            );
-                    tradesToExecute++;
-                    remainingAmount = 0;
-                    break;
-                } else {
-                    trades[i] = getTradeFrom(1, _marketIndex, uint256(_accountPortfolio[i].notional));
-                    tradesToExecute++;
-                    remainingAmount -= underlyingPosition;
-                    maturity = 0;
-                }
+        
+        // Minor gas savings
+        uint16 _currencyID = currencyID;
+        // Liquidate the proportional part of nTokens necessary
+        // We calculate the number of tokens to redeem by calculating the % of assets to 
+        // liquidate and applying that % to the # of nTokens held
+        // NOTE: We do not use estimatedTotalAssets as it includes the value of the rewards
+        // instead we use the internal function calculating the value of the nToken position
+        uint256 portfolioValue = _getNTokenTotalValueFromPortfolio();
+        uint256 tokensToRedeem = nToken.balanceOf(address(this));
+        if (portfolioValue > 0) {
+            if(portfolioValue > amountToLiquidate) {
+                // Calculate proportion of nTokens to redeem
+                tokensToRedeem = amountToLiquidate
+                .mul(tokensToRedeem)
+                .div(portfolioValue);
             }
+            // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
+            executeBalanceAction(
+                DepositActionType.RedeemNToken, 
+                tokensToRedeem
+            );
         }
-        // NOTE: if for some reason we reach this with remainingAmount > 0, we will report losses !
-        // this makes sense because means we have iterated over all markets and haven't been able to withdraw
-
-        // As we did not know the number of trades we needed to make, we adjust the array to only include
-        // non-empty trades (reverts otherwise)
-        bytes32[] memory final_trades = new bytes32[](tradesToExecute);
-        for (uint256 j=0; j<tradesToExecute; j++) {
-            final_trades[j] = trades[j];
-        }
-
-        // Execute previously calculated trades
-        // We won't deposit anything (we are withdrawing) and we signal that we want the underlying to hit the strategy (instead of remaining in our Notional account)
-        executeBalanceActionWithTrades(
-            DepositActionType.None, 
-            0,
-            0, 
-            true,
-            true,
-            final_trades
-        );
 
         // Assess result 
         uint256 totalAssets = balanceOfWant();
@@ -581,11 +692,64 @@ contract Strategy is BaseStrategy {
             _loss = _amountNeeded.sub(totalAssets);
             
         } else {
-            _liquidatedAmount = _amountNeeded;
+            _liquidatedAmount = totalAssets;
         }
 
-        // Re-set the toggle to false
-        toggleRealizeLosses = false;
+    }
+    
+    /*
+     * @notice
+     *  External function used in emergency to redeem a specific amount of tokens manually
+     * @param amountToRedeem number of tokens to redeem
+     * @return uint256 amountLiquidated, the total amount liquidated
+     */
+    function redeemNTokenAmount(uint256 amountToRedeem) external onlyVaultManagers {
+        executeBalanceAction(
+                    DepositActionType.RedeemNToken, 
+                    amountToRedeem
+                );
+    }
+
+    /*
+     * @notice
+     *  Redeem nTokens in the protection period accepting the discount when converting to 
+     * asset cash - only used manually in case of emergency
+     * @param tokensToRedeem number of tokens to redeem
+     * @param sellTokenAssets Whether to sell the corresponding fcash positions or not
+     * @param acceptResidualAssets Whether to accepot a residual position in the account or not
+     * @return int256 total amount of asset cash redeemed
+     * @return bool if there were residuals that were placed into the portfolio
+     */
+    function redeemIdiosyncratic(
+        uint96 tokensToRedeem,
+        bool sellTokenAssets,
+        bool acceptResidualAssets
+    ) external onlyVaultManagers returns (int256, bool){
+        return nProxy.nTokenRedeem(
+            address(this), 
+            currencyID, 
+            tokensToRedeem, 
+            sellTokenAssets,
+            acceptResidualAssets
+            );
+    }
+
+    /*
+     * @notice
+     *  Withdraw asset cash in the strategy's account resulting of an nToken redeem during
+     * an idioyncratic period
+     * @param amountInternalPrecision asset cash to redeem (cTokens)
+     * @param redeemToUnderlying wether to receive cTokens or underlying (want)
+     * @return uint256 total amount withdrawn
+     */
+    function withdrawFromNotional(
+        uint88 amountInternalPrecision,
+        bool redeemToUnderlying
+    ) external onlyVaultManagers returns(uint256) {
+        return nProxy.withdraw(
+            currencyID, 
+            amountInternalPrecision, 
+            redeemToUnderlying);
     }
 
     /*
@@ -594,10 +758,28 @@ contract Strategy is BaseStrategy {
      * @return uint256 amountLiquidated, the total amount liquidated
      */
     function liquidateAllPositions() internal override returns (uint256) {
-        
-        (uint256 amountLiquidated, ) = liquidatePosition(estimatedTotalAssets());
+        if (toggleClaimRewards) {
+            uint256 claimableRewards = noteToken.balanceOf(address(this));
+            claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+            if(claimableRewards > 0) {
+                _claimAndSellRewards();
+            }
+        }
+        uint256 nTokenBalance = nToken.balanceOf(address(this));
+        executeBalanceAction(
+                    DepositActionType.RedeemNToken, 
+                    nTokenBalance
+                );
 
-        return amountLiquidated;
+        return balanceOfWant();
+    }
+
+    /*
+     * @notice
+     *  External function used in emergency to claim and swap to want tokens the NOTE rewards
+     */
+    function manuallyClaimAndSellRewards() external onlyVaultManagers {
+        _claimAndSellRewards();
     }
     
     /*
@@ -606,40 +788,39 @@ contract Strategy is BaseStrategy {
      * @param _newStrategy address where the contract of the new strategy is located
      */
     function prepareMigration(address _newStrategy) internal override {
-        _checkPositionsAndWithdraw();
-        PortfolioAsset[] memory _accountPortfolio = nProxy.getAccountPortfolio(address(this));
-
-        uint256 _id = 0;
-        for(uint256 i = 0; i < _accountPortfolio.length; i++) {
-            _id = nProxy.encodeToId(
-                currencyID, 
-                uint40(_accountPortfolio[i].maturity), 
-                uint8(_accountPortfolio[i].assetType)
-                );
-            nProxy.safeTransferFrom(
-                address(this), 
-                _newStrategy,
-                _id, 
-                uint256(_accountPortfolio[i].notional),
-                ""
-                );
+        if (toggleClaimRewards) {
+            uint256 claimableRewards = noteToken.balanceOf(address(this));
+            claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+            if(claimableRewards > 0) {
+                _claimAndSellRewards();
+            }
         }
-        
+
+        if(!forceMigration) {
+            // Transfer nTokens and NOTE incentives (may be necessary to claim them)
+            uint256 nTokenBalance = nToken.balanceOf(address(this));
+            _transferNTokens(_newStrategy, nTokenBalance);
+        }
     }
 
     /*
      * @notice
-     *  Callback function needed to receive ERC1155 (fcash), not needed for the first startegy contract but 
-     * relevant for all the next ones
-     * @param _sender, address of the msg.sender
-     * @param _from, address of the contract sending the erc1155
-     * @_id, encoded id of the asset (fcash or liquidity token)
-     * @_amount, amount of assets tor receive
-     * _data, bytes calldata to perform extra actions after receiving the erc1155
-     * @return bytes4, constant accepting the erc1155
+     *  Exernal function used to manually migrate nTokens tokens to a new strategy
+     * @param newStrategy address where the contract of the new strategy is located
+     * @param amount number of nTokens to migrate
      */
-    function onERC1155Received(address _sender, address _from, uint256 _id, uint256 _amount, bytes calldata _data) public returns(bytes4){
-        return ERC1155_ACCEPTED;
+    function manuallyTransferNTokens(address newStrategy, uint256 amount) external onlyGovernance {
+        _transferNTokens(newStrategy, amount);
+    }
+
+    /*
+     * @notice
+     *  Internal function used to migrate nTokens tokens to a new strategy
+     * @param _to address where the contract of the new strategy is located
+     * @param _amount number of nTokens to migrate
+     */
+    function _transferNTokens(address _to, uint256 _amount) internal {
+        nToken.transfer(_to, _amount);
     }
 
     /*
@@ -712,31 +893,22 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
-     *  Internal function used to check whether there are positions that have reached maturity and if so, 
-     * settle and withdraw them realizing the profits in the strategy's 'want' balance
+     *  Internal view estimating the rewards value in want tokens. We simulate the trade in balancer to 
+     * get WETH from the NOTE / WETH pool and if want is not weth, we simulate a trade in sushi to obtain want tokens 
+     * @return uint256 tokensOut, current number of want tokens the strategy would obtain for its rewards
      */
-    function _checkPositionsAndWithdraw() internal {
-        // We check if there is anything to settle in the account's portfolio by checking the account's
-        // nextSettleTime in the account context
-        AccountContext memory _accountContext = nProxy.getAccountContext(address(this));
-
-        // If there is something to settle, do it and withdraw to the strategy's balance
-        if (uint256(_accountContext.nextSettleTime) < block.timestamp) {
-            nProxy.settleAccount(address(this));
-
-            (int256 cashBalance, 
-            int256 nTokenBalance,
-            uint256 lastClaimTime) = nProxy.getAccountBalance(currencyID, address(this));
-
-            if(cashBalance > 0) {
-                nProxy.withdraw(currencyID, uint88(cashBalance), true);
-                if (currencyID == 1) {
-                    // Only necessary for wETH/ ETH pair
-                    weth.deposit{value: address(this).balance}();
-                }
-                maturity = 0;
-            }
-        }
+    function _getRewardsValue() internal view returns(uint256 tokensOut) {
+        // Call the view library
+        return NotionalLpLib.getRewardsValue(
+            noteToken,
+            nProxy,
+            balancerVault,
+            poolId,
+            balancerPool,
+            currencyID,
+            quoter,
+            address(want)
+        );
 
     }
 
@@ -746,30 +918,17 @@ contract Strategy is BaseStrategy {
      * fees incurred by leaving the position early. Represents the NPV of the position today.
      * @return uint256 _totalWantValue, the total amount of 'want' tokens of the strategy's positions
      */
-    function _getTotalValueFromPortfolio() internal view returns(uint256 _totalWantValue) {
-        PortfolioAsset[] memory _accountPortfolio = nProxy.getAccountPortfolio(address(this));
-        MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
-        // Iterate over all active markets and sum value of each position 
-        for(uint256 i = 0; i < _accountPortfolio.length; i++) {
-            for(uint256 j = 0; j < _activeMarkets.length; j++){
-                if(_accountPortfolio[i].maturity < block.timestamp) {
-                    // Convert the fcash amount of the position to underlying assuming a 1:1 conversion rate
-                    // (taking into account decimals difference)
-                    _totalWantValue += uint256(_accountPortfolio[i].notional).mul(DECIMALS_DIFFERENCE).div(MAX_BPS);
-                    break;
-                }
-                if(_accountPortfolio[i].maturity == _activeMarkets[j].maturity) {
-                    (, int256 underlyingPosition) = nProxy.getCashAmountGivenfCashAmount(
-                        currencyID,
-                        int88(-_accountPortfolio[i].notional),
-                        j+1,
-                        block.timestamp
-                    );
-                    _totalWantValue += uint256(underlyingPosition).mul(DECIMALS_DIFFERENCE).div(MAX_BPS);
-                    break;
-                }
-            }
-        }
+    function _getNTokenTotalValueFromPortfolio() internal view returns(uint256 totalUnderlyingClaim) {
+        address nTokenAddress = address(nToken);
+
+        return NotionalLpLib.getNTokenTotalValueFromPortfolio(
+                NotionalLpLib.NTokenTotalValueFromPortfolioVars(
+                    address(this), 
+                    nTokenAddress,
+                    nProxy,
+                    currencyID
+                )
+            );
     }
 
     // CALCS
@@ -782,49 +941,10 @@ contract Strategy is BaseStrategy {
         return want.balanceOf(address(this));
     }
 
-    /*
-     * @notice
-     *  Get the market index of a current position to calculate the real cash valuation
-     * @param _maturity, Maturity of the position to value
-     * @param _activeMarkets, All current active markets for the currencyID
-     * @return uint256 result, market index of the position to value
-     */
-    function _getMarketIndexForMaturity(
-        uint256 _maturity
-    ) internal view returns(uint256) {
-        MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
-        bool success = false;
-        for(uint256 j=0; j<_activeMarkets.length; j++){
-            if(_maturity == _activeMarkets[j].maturity) {
-                return j+1;
-            }
-        }
-        
-        if (success == false) {
-            return 0;
-        }
-    }
-
-    /*
-     * @notice
-     *  Internal function calculating the market index with the shortest maturity that was at 
-     * least minAmountToMaturity seconds still 
-     * @return uint256 result, the minimum market index the strategy should be entering positions into
-     * @return uint256 maturity, the minimum market index's maturity the strategy should be entering positions into
-     */
-    function _getMinimumMarketIndex() internal view returns(uint256, uint256) {
-        MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
-        for(uint256 i = 0; i<_activeMarkets.length; i++) {
-            if (_activeMarkets[i].maturity - block.timestamp >= minTimeToMaturity) {
-                return (i+1, uint256(_activeMarkets[i].maturity));
-            }
-        }
-    } 
-
     // NOTIONAL FUNCTIONS
     /*
      * @notice
-     *  Internal function executing a 'batchBalanceAndTradeAction' within Notional to either Lend or Borrow
+     *  Internal function executing a 'batchBalanceAndTradeAction' within Notional to either Lend,Borrow or mint nTokens
      * @param actionType, Identification of the action to perform, following the Notional classification 
      * in enum 'DepositActionType'
      * @param withdrawAmountInternalPrecision, withdraw an amount of asset cash specified in Notional 
@@ -834,59 +954,56 @@ contract Strategy is BaseStrategy {
      * @param redeemToUnderlying, whether to redeem asset cash to the underlying token on withdraw
      * @param trades, array of bytes32 trades to perform
      */
-    function executeBalanceActionWithTrades(
+    function executeBalanceAction(
         DepositActionType actionType,
-        uint256 depositActionAmount,
-        uint256 withdrawAmountInternalPrecision,
-        bool withdrawEntireCashBalance,
-        bool redeemToUnderlying,
-        bytes32[] memory trades) internal {
-        BalanceActionWithTrades[] memory actions = new BalanceActionWithTrades[](1);
-        // gas savings
+        uint256 depositActionAmount
+        ) internal {
+
         uint16 _currencyID = currencyID;
-        actions[0] = BalanceActionWithTrades(
+        // Handle the 24h protection window where an nToken may have an idiosyncratic position
+        if (NotionalLpLib.checkIdiosyncratic(nProxy, _currencyID, address(nToken))) {
+            return;
+        }
+
+        BalanceAction[] memory actions = new BalanceAction[](1);
+        // gas savings
+        actions[0] = BalanceAction(
             actionType,
             _currencyID,
             depositActionAmount,
-            withdrawAmountInternalPrecision, 
-            withdrawEntireCashBalance,
-            redeemToUnderlying,
-            trades
+            0,
+            true, 
+            true
         );
 
         if (_currencyID == 1) {
-            nProxy.batchBalanceAndTradeAction{value: depositActionAmount}(address(this), actions);
+            if (actionType == DepositActionType.DepositUnderlyingAndMintNToken) {
+                nProxy.batchBalanceAction{value: depositActionAmount}(address(this), actions);
+            } else if (actionType == DepositActionType.RedeemNToken) {
+                nProxy.batchBalanceAction(address(this), actions);
+            }
             weth.deposit{value: address(this).balance}();
         } else {
-            nProxy.batchBalanceAndTradeAction(address(this), actions);
+            nProxy.batchBalanceAction(address(this), actions);
         }
     }
 
-    /*
+     /*
      * @notice
-     *  Internal function Closing a current non-mature position to re-invest the amount into a new 
-     * higher maturity market
-     * @param _currentMaturity, current maturity the strategy is invested in
-     * @return uint256, liberated amount, now existing in want balance to add up to the availableWantBalance
-     * to trade into in adjustPosition()
+     *  Public function used by the keeper to assess whether a harvest is necessary or not, 
+     * returns true only if there is a position to settle
+     * @param callCostInWei, call cost estimation performed by the keeper
+     * @return bool, true when the strategy has a mature position
      */
-    function _rollOverTrade(uint256 _currentMaturity) internal returns(uint256) {
-        uint256 prevBalance = balanceOfWant();
-        PortfolioAsset[] memory _accountPortfolio = nProxy.getAccountPortfolio(address(this));
-        uint256 _currentIndex = _getMarketIndexForMaturity(_currentMaturity);
-        
-        bytes32[] memory rollTrade = new bytes32[](1);
-        rollTrade[0] = getTradeFrom(1, _currentIndex, uint256(_accountPortfolio[0].notional));
-        executeBalanceActionWithTrades(
-            DepositActionType.None, 
-            0,
-            0, 
-            true,
-            true,
-            rollTrade
-        );
-        
-        return (balanceOfWant() - prevBalance);
-    }
+    function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
+        // Check whether there are still 12h to market roll
+        MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
+        if (_activeMarkets[0].maturity.sub(block.timestamp) < 12 * 3_600 
+            && vault.strategies(address(this)).debtRatio == 0
+            && nToken.balanceOf(address(this)) > 0 
+            ) {
+            return true;
+        }
+    } 
 
 }
