@@ -139,3 +139,17 @@ def buy_residuals(n_proxy_batch, n_proxy_implementation, currencyID, million_in_
 def airdrop_amount_rewards(strategy, amount, note_token, note_whale):
     n_notes = utils.utils.amount_in_NOTE(amount)
     note_token.transfer(strategy, n_notes, {"from": note_whale})
+
+def sell_rewards_to_want(router, want, weth, strategy, gov, currencyID):
+    strategy.swapToWETHManually({"from": gov})
+    amount_in = weth.balanceOf(strategy)
+    if currencyID > 1 and amount_in > 0:
+        weth.approve(router, 2**255-1, {"from":strategy})
+        router.swapExactTokensForTokens(
+            amount_in, 
+            0, 
+            [weth, want], 
+            strategy, 
+            chain.time()+10, 
+            {"from":strategy}
+            )
