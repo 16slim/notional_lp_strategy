@@ -99,8 +99,9 @@ interface NotionalProxy is nTokenERC20, nERC1155Interface, NotionalGovernance, N
         address redeemer,
         uint16 currencyId,
         uint96 tokensToRedeem_,
-        bool sellTokenAssets
-    ) external returns (int256);
+        bool sellTokenAssets,
+        bool acceptResidualAssets
+    ) external returns (int256, bool);
 
     /** Account Action */
     function enableBitmapCurrency(uint16 currencyId) external;

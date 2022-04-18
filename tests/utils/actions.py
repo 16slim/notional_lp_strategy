@@ -26,6 +26,34 @@ def wait_half_until_settlement(next_settlement):
     chain.mine(1)
     return
 
+def wait_n_days(days):
+    n_blocks_to_mine = int(days * 86400 / 13)
+    chain.mine(n_blocks_to_mine, timedelta= 86_400 * days)
+
+def borrow_1m_whales(n_proxy_views, currencyID, token, n_proxy_batch, whale, million_fcash_notation):
+    million = utils.utils.million_in_token(token)
+    token.approve(n_proxy_views.address, 2 * million, {"from":whale})
+    n_proxy_batch.batchBalanceAndTradeAction(whale, \
+            [(2, utils.utils.get_currency_id(token), 2 * million, 0, 0, 1,\
+                [])], \
+                    {"from": whale,\
+                        })
+    fcash_position = -n_proxy_views.getfCashAmountGivenCashAmount(
+        currencyID,
+        million_fcash_notation,
+        1,
+        chain.time()+1
+    )
+    trade = encode_abi_packed(
+            ["uint8", "uint8", "uint88", "uint32", "uint120"], 
+            [1, 1, fcash_position, 0, 0]
+        )
+    n_proxy_batch.batchBalanceAndTradeAction(whale, \
+        [(0, currencyID, 0, 0, 1, 1,\
+            [trade])], \
+                {"from": whale,\
+                     "value":0})
+    
 
 def whale_drop_rates(n_proxy_batch, whale, token, n_proxy_views, currencyID, balance_threshold, market_index):
 
@@ -64,7 +92,7 @@ def whale_exit(n_proxy_batch, whale, n_proxy_views, currencyID, market_index):
     fcash_position = n_proxy_views.getAccount(whale)[2][0][3]
     trade = encode_abi_packed(
             ["uint8", "uint8", "uint88", "uint32", "uint120"], 
-            [1, 1, fcash_position, 0, 0]
+            [1, market_index, fcash_position, 0, 0]
         )
     n_proxy_batch.batchBalanceAndTradeAction(whale, \
         [(0, currencyID, 0, 0, 1, 1,\
@@ -107,4 +135,21 @@ def buy_residuals(n_proxy_batch, n_proxy_implementation, currencyID, million_in_
             [trade])], \
                 {"from": token_whale,\
                      "value":0})
-    
+
+def airdrop_amount_rewards(strategy, amount, note_token, note_whale):
+    n_notes = utils.utils.amount_in_NOTE(amount)
+    note_token.transfer(strategy, n_notes, {"from": note_whale})
+
+def sell_rewards_to_want(router, want, weth, strategy, gov, currencyID):
+    strategy.swapToWETHManually({"from": gov})
+    amount_in = weth.balanceOf(strategy)
+    if currencyID > 1 and amount_in > 0:
+        weth.approve(router, 2**255-1, {"from":strategy})
+        router.swapExactTokensForTokens(
+            amount_in, 
+            0, 
+            [weth, want], 
+            strategy, 
+            chain.time()+10, 
+            {"from":strategy}
+            )
