@@ -6,7 +6,7 @@ import pytest
 def test_avoid_idiosyncratic_period(
     chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
     n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, 
-    million_in_token, note_token
+    million_in_token, note_token, sushiswap_router, weth
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
@@ -57,7 +57,7 @@ def test_avoid_idiosyncratic_period(
         vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
         strategy.setToggleClaimRewards(False, {"from": vault.governance()})
         strategy.setDoHealthCheck(False, {"from": gov})
-        
+        actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
         tx = strategy.harvest({"from": gov})
         assert tx.events["Harvested"]["profit"] == 0
         assert tx.events["Harvested"]["loss"] == 0
@@ -77,6 +77,7 @@ def test_avoid_idiosyncratic_period(
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
     strategy.setToggleClaimRewards(True, {"from": vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": gov})
     assert tx.events["Harvested"]["profit"] > 0
     assert tx.events["Harvested"]["loss"] == 0
@@ -88,7 +89,7 @@ def test_avoid_idiosyncratic_period(
 def test_exit_during_idiosyncratic_period(
     chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
     n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, 
-    million_in_token, note_token
+    million_in_token, note_token, sushiswap_router, weth
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
@@ -135,6 +136,7 @@ def test_exit_during_idiosyncratic_period(
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
     strategy.setToggleClaimRewards(True, {"from": vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": gov})
 
     chain.mine(1, timedelta = 6 * 3600)
