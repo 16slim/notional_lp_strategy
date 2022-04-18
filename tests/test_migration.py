@@ -19,7 +19,8 @@ def test_migration(
     n_proxy_views,
     balancer_note_weth_pool,
     note_token,
-    note_whale
+    note_whale,
+    sushiswap_router, weth
 ):
     # Deposit to the vault and harvest
     actions.user_deposit(user, vault, token, amount)
@@ -52,18 +53,21 @@ def test_migration(
 
     vault.migrateStrategy(new_strategy, new_new_strategy, {"from": gov})
 
-    # rewards should have stayed at prev. strat
-    assert pytest.approx(new_strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == prev_rewards
+    
     assert strategy.estimatedTotalAssets() == 0
+    assert new_strategy.estimatedTotalAssets() == 0
     #  new strat only has vault debt
     assert pytest.approx(new_new_strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == vault.strategies(new_new_strategy)["totalDebt"]
     # create a profitable harvest
     actions.airdrop_amount_rewards(new_new_strategy, 500, note_token, note_whale)
     vault.updateStrategyDebtRatio(new_new_strategy, 0, {"from": gov})
     new_new_strategy.setToggleClaimRewards(True, {"from":gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, new_new_strategy, gov, currencyID)
     # check that harvest work as expected
     tx = new_new_strategy.harvest({"from": gov})
-
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, new_new_strategy, gov, currencyID)
+    new_new_strategy.setDoHealthCheck(False, {"from": gov})
+    
     assert tx.events["Harvested"]["profit"] > 0
     assert token.balanceOf(vault) > amount
 
