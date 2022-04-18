@@ -23,3 +23,17 @@ def test_clone(
             balancer_vault.address, balancer_note_weth_pool,
             {"from": strategist}
         )
+    
+    # Re-initializing the strat should not work
+    with reverts():
+        strategy.initialize(
+            vault, 
+            strategist, 
+            strategy.rewards(), 
+            strategy.keeper(), 
+            strategy.nProxy(), 
+            currencyID, 
+            balancer_vault, 
+            balancer_note_weth_pool, 
+            {"from": gov}
+            )
