@@ -770,8 +770,8 @@ contract Strategy is BaseStrategy {
 
         if(!forceMigration) {
             // Transfer nTokens and NOTE incentives (may be necessary to claim them)
-            uint256 nTokenBalance = nToken.balanceOf(address(this));
-            _transferNTokens(_newStrategy, nTokenBalance);
+            _transferNTokens(_newStrategy, nToken.balanceOf(address(this)));
+            _transferNOTETokens(_newStrategy, noteToken.balanceOf(address(this)));
         }
     }
 
@@ -797,12 +797,22 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
+     *  Internal function used to migrate NOTE tokens to a new strategy
+     * @param _to address where the contract of the new strategy is located
+     * @param _amount number of NOTE to migrate
+     */
+    function _transferNOTETokens(address _to, uint256 _amount) internal {
+        noteToken.transfer(_to, _amount);
+    }
+
+    /*
+     * @notice
      *  External function used to migrate NOTE tokens to a new strategy
      * @param newStrategy address where the contract of the new strategy is located
      * @param amount number of NOTE to migrate
      */
     function transferNOTETokensManually (address newStrategy, uint256 amount) external onlyGovernance {
-        noteToken.transfer(newStrategy, amount);
+        _transferNOTETokens(newStrategy, amount);
     }
 
     /*
@@ -975,7 +985,7 @@ contract Strategy is BaseStrategy {
      *  Internal function removing permissions for the existing trade factory
      */
     function _removeTradeFactoryPermissions() internal {
-        noteToken.safeApprove(tradeFactory, 0);
+        noteToken.safeApprove(tradeFactory, 1);
         IERC20(address(weth)).safeApprove(tradeFactory, 0);
         tradeFactory = address(0);
     }
