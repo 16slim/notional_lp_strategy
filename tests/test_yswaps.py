@@ -69,6 +69,7 @@ def test_yswap_profitable_harvest(
     print(f"Strategy total assets: {strategy.estimatedTotalAssets()}")
     
     vault.updateStrategyDebtRatio(strategy, 0, {'from': gov})
+    strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({'from': strategist})
 
     assert token.balanceOf(vault) > amount

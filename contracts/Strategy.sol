@@ -985,7 +985,7 @@ contract Strategy is BaseStrategy {
      *  Internal function removing permissions for the existing trade factory
      */
     function _removeTradeFactoryPermissions() internal {
-        noteToken.safeApprove(tradeFactory, 1);
+        noteToken.safeApprove(tradeFactory, 0);
         IERC20(address(weth)).safeApprove(tradeFactory, 0);
         tradeFactory = address(0);
     }

@@ -25,19 +25,21 @@ def test_force_migration(
         strategy.getBalancerVault(), balancer_note_weth_pool)
 
     # migrate nTokens
+    assert note_token.balanceOf(strategy) == 0
+    strategy.manuallyClaimRewards({"from": gov})
+    assert note_token.balanceOf(strategy) > 0
     strategy.manuallyTransferNTokens(new_strategy, amount_tokens, {"from": gov})
-
-    # claim rewards manually
-    strategy.setToggleClaimRewards(True, {"from":gov})
-    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
+    note_balance = note_token.balanceOf(strategy)
+    strategy.transferNOTETokensManually(new_strategy, note_balance, {"from":gov})
+    
     # no more rewards in the strat
     assert strategy.getRewardsValue() == 0
-
+    assert note_token.balanceOf(new_strategy) == note_balance
     # previous strategy has no tokens
     assert n_proxy_views.getAccount(strategy)[1][0][2] == 0
     assert n_proxy_views.getAccount(new_strategy)[1][0][2] == amount_tokens
     # exchanged rewards are pending to be swept in the previous strategy
-    assert token.balanceOf(strategy) > 0
+    assert strategy.estimatedTotalAssets() == 0
 
     # prevent the strategy form executing any code with the ntoken
     strategy.setForceMigration(True, {"from": gov})
@@ -47,7 +49,8 @@ def test_force_migration(
 
     # previous strat is completely empty
     assert strategy.estimatedTotalAssets() == 0
-    assert token.balanceOf(new_strategy) > 0
+    assert new_strategy.estimatedTotalAssets() > 0
+    assert token.balanceOf(new_strategy) == 0
 
     # give it all back to the vault
     vault.updateStrategyDebtRatio(new_strategy, 0, {"from":gov})
