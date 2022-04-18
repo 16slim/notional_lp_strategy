@@ -234,4 +234,41 @@ library NotionalLpLib {
 
     }
 
+    /*
+     * @notice
+     *  Function exchanging between ETH to 'want'
+     * @param amount, Amount to exchange
+     * @param asset, 'want' asset to exchange to
+     * @param nProxy, Notional Proxu address
+     * @param currendyID, ID of want
+     * @return uint256 result, the equivalent ETH amount in 'want' tokens
+     */
+    function fromETH(
+        uint256 amount,
+        address asset,
+        NotionalProxy nProxy,
+        uint16 currencyID
+        )
+        external
+        view
+        returns (uint256)
+    {
+        if (
+            amount == 0 ||
+            amount == type(uint256).max ||
+            address(asset) == address(weth) // 1:1 change
+        ) {
+            return amount;
+        }
+
+        (
+            Token memory assetToken,
+            Token memory underlyingToken,
+            ETHRate memory ethRate,
+            AssetRateParameters memory assetRate
+        ) = nProxy.getCurrencyAndRates(currencyID);
+            
+        return amount.mul(uint256(underlyingToken.decimals)).div(uint256(ethRate.rate));
+    }
+
 }

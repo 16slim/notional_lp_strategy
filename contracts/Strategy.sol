@@ -735,7 +735,7 @@ contract Strategy is BaseStrategy {
      */
     function liquidateAllPositions() internal override returns (uint256) {
         if (toggleClaimRewards) {
-            if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 1) {
+            if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
                 _claimRewards();
             }
         }
@@ -797,6 +797,16 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
+     *  External function used to migrate NOTE tokens to a new strategy
+     * @param newStrategy address where the contract of the new strategy is located
+     * @param amount number of NOTE to migrate
+     */
+    function transferNOTETokensManually (address newStrategy, uint256 amount) external onlyGovernance {
+        noteToken.transfer(newStrategy, amount);
+    }
+
+    /*
+     * @notice
      *  Define protected tokens for the strategy to manage persistently that will not get converted back
      * to 'want'
      * @return address result, the address of the tokens to protect
@@ -822,45 +832,14 @@ contract Strategy is BaseStrategy {
      * @param _amtInWei The amount (in wei/1e-18 ETH) to convert to `want`
      * @return The amount in `want` of `_amtInEth` converted to `want`
      */
-    function ethToWant(uint256 _amtInWei)
+    function ethToWant(uint256 amtInWei)
         public
         view
         override
         returns (uint256)
     {
-        // return _fromETH(_amtInWei, address(want));
-        return _amtInWei;
+        return NotionalLpLib.fromETH(amtInWei, address(want), nProxy, currencyID);
     }
-
-    /*
-     * @notice
-     *  Internal function exchanging between ETH to 'want'
-     * @param _amount, Amount to exchange
-     * @param asset, 'want' asset to exchange to
-     * @return uint256 result, the equivalent ETH amount in 'want' tokens
-     */
-    // function _fromETH(uint256 _amount, address asset)
-    //     internal
-    //     view
-    //     returns (uint256)
-    // {
-    //     if (
-    //         _amount == 0 ||
-    //         _amount == type(uint256).max ||
-    //         address(asset) == address(weth) // 1:1 change
-    //     ) {
-    //         return _amount;
-    //     }
-
-    //     (
-    //         Token memory assetToken,
-    //         Token memory underlyingToken,
-    //         ETHRate memory ethRate,
-    //         AssetRateParameters memory assetRate
-    //     ) = nProxy.getCurrencyAndRates(currencyID);
-            
-    //     return _amount.mul(uint256(underlyingToken.decimals)).div(uint256(ethRate.rate));
-    // }
 
     // INTERNAL FUNCTIONS
 
@@ -1000,23 +979,5 @@ contract Strategy is BaseStrategy {
         IERC20(address(weth)).safeApprove(tradeFactory, 0);
         tradeFactory = address(0);
     }
-
-     /*
-     * @notice
-     *  Public function used by the keeper to assess whether a harvest is necessary or not, 
-     * returns true only if there is a position to settle
-     * @param callCostInWei, call cost estimation performed by the keeper
-     * @return bool, true when the strategy has a mature position
-     */
-    // function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
-    //     // Check whether there are still 12h to market roll
-    //     MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
-    //     if (_activeMarkets[0].maturity.sub(block.timestamp) < 12 * 3_600 
-    //         && vault.strategies(address(this)).debtRatio == 0
-    //         && nToken.balanceOf(address(this)) > 0 
-    //         ) {
-    //         return true;
-    //     }
-    // } 
 
 }
