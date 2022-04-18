@@ -40,6 +40,9 @@ import {
     ETHRate
 } from "../interfaces/notional/Types.sol";
 
+// Import the trade factory enabler
+import "../interfaces/ySwaps/ITradeFactory.sol";
+
 /*
      * @notice
      *  Yearn Strategy allocating vault's funds to an LP position funding Notional's fixed rate lend and borrow markets
@@ -75,6 +78,8 @@ contract Strategy is BaseStrategy {
     bool private isOriginal = true;
     // To control whether migrations try to get positions out of notional
     bool private forceMigration;
+    // ySwap trade factory
+    address private tradeFactory = address(0);
     // EVENTS
     event Cloned(address indexed clone);
 
@@ -276,6 +281,15 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
+     *  Getter function for the ySwap trade factory
+     * @return address, current tradeFactory state variable
+     */
+    function getTradeFactory() external view returns(address) {
+        return tradeFactory;
+    }
+
+    /*
+     * @notice
      *  Getter function for the current minimum amount of want required to enter a position
      * @return uint256, current minAmountWant state variable
      */
@@ -429,11 +443,8 @@ contract Strategy is BaseStrategy {
      *  Function claiming the pending rewards for the strategy (if any) to be swapped in yswaps
      * @return uint256, value containing the current valuation of accumulakted rewards
      */
-    function _claimAndSellRewards() internal {
-        uint256 _incentives = noteToken.balanceOf(address(this));
-        _incentives += nProxy.nTokenClaimIncentives();
-        
-
+    function _claimRewards() internal returns(uint256) {
+        nProxy.nTokenClaimIncentives();
     }
 
     /*
@@ -443,7 +454,7 @@ contract Strategy is BaseStrategy {
      */
     function swapToWETHManually() external onlyVaultManagers {
         uint256 _incentives = noteToken.balanceOf(address(this));
-        _incentives += nProxy.nTokenClaimIncentives();
+        _incentives += _claimRewards();
 
         if (_incentives > 0) {
             // Create the NOTE/WETH swap object for balancer
@@ -486,7 +497,7 @@ contract Strategy is BaseStrategy {
     {   
         if (toggleClaimRewards) {
             // Get all possible rewards to th strategy (in want)
-            _claimAndSellRewards();
+            _claimRewards();
         }
         // We only need profit for decision making
         (_profit, ) = getUnrealisedPL();
@@ -727,7 +738,7 @@ contract Strategy is BaseStrategy {
             uint256 claimableRewards = noteToken.balanceOf(address(this));
             claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
             if(claimableRewards > 0) {
-                _claimAndSellRewards();
+                _claimRewards();
             }
         }
         uint256 nTokenBalance = nToken.balanceOf(address(this));
@@ -743,8 +754,8 @@ contract Strategy is BaseStrategy {
      * @notice
      *  External function used in emergency to claim and swap to want tokens the NOTE rewards
      */
-    function manuallyClaimAndSellRewards() external onlyVaultManagers {
-        _claimAndSellRewards();
+    function manuallyClaimRewards() external onlyVaultManagers {
+        _claimRewards();
     }
     
     /*
@@ -757,7 +768,7 @@ contract Strategy is BaseStrategy {
             uint256 claimableRewards = noteToken.balanceOf(address(this));
             claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
             if(claimableRewards > 0) {
-                _claimAndSellRewards();
+                _claimRewards();
             }
         }
 
@@ -821,7 +832,8 @@ contract Strategy is BaseStrategy {
         override
         returns (uint256)
     {
-        return _fromETH(_amtInWei, address(want));
+        // return _fromETH(_amtInWei, address(want));
+        return _amtInWei;
     }
 
     /*
@@ -831,28 +843,28 @@ contract Strategy is BaseStrategy {
      * @param asset, 'want' asset to exchange to
      * @return uint256 result, the equivalent ETH amount in 'want' tokens
      */
-    function _fromETH(uint256 _amount, address asset)
-        internal
-        view
-        returns (uint256)
-    {
-        if (
-            _amount == 0 ||
-            _amount == type(uint256).max ||
-            address(asset) == address(weth) // 1:1 change
-        ) {
-            return _amount;
-        }
+    // function _fromETH(uint256 _amount, address asset)
+    //     internal
+    //     view
+    //     returns (uint256)
+    // {
+    //     if (
+    //         _amount == 0 ||
+    //         _amount == type(uint256).max ||
+    //         address(asset) == address(weth) // 1:1 change
+    //     ) {
+    //         return _amount;
+    //     }
 
-        (
-            Token memory assetToken,
-            Token memory underlyingToken,
-            ETHRate memory ethRate,
-            AssetRateParameters memory assetRate
-        ) = nProxy.getCurrencyAndRates(currencyID);
+    //     (
+    //         Token memory assetToken,
+    //         Token memory underlyingToken,
+    //         ETHRate memory ethRate,
+    //         AssetRateParameters memory assetRate
+    //     ) = nProxy.getCurrencyAndRates(currencyID);
             
-        return _amount.mul(uint256(underlyingToken.decimals)).div(uint256(ethRate.rate));
-    }
+    //     return _amount.mul(uint256(underlyingToken.decimals)).div(uint256(ethRate.rate));
+    // }
 
     // INTERNAL FUNCTIONS
 
@@ -953,6 +965,46 @@ contract Strategy is BaseStrategy {
         }
     }
 
+    // ----------------- YSWAPS FUNCTIONS ---------------------
+
+    /*
+     * @notice
+     *  External function used by gov to set up the yswaps trade factory
+     * and give allowances where needed
+     * @param _tradeFactory, Address of the trade factory to use
+     */
+    function setTradeFactory(address _tradeFactory) external onlyGovernance {
+        if (tradeFactory != address(0)) {
+            _removeTradeFactoryPermissions();
+        }
+        // approve and set up trade factory
+        noteToken.safeApprove(_tradeFactory, type(uint256).max);
+        weth.safeApprove(_tradeFactory, type(uint256).max);
+        ITradeFactory tf = ITradeFactory(_tradeFactory);
+        tf.enable(address(noteToken), address(want));
+        tf.enable(address(weth), address(want));
+        tradeFactory = _tradeFactory;
+    }
+
+    /*
+     * @notice
+     *  External function used by onlyEmergencyAuthorized remove permissions
+     * for the existing trade factory
+     */
+    function removeTradeFactoryPermissions() external onlyEmergencyAuthorized {
+        _removeTradeFactoryPermissions();
+    }
+
+    /*
+     * @notice
+     *  Internal function removing permissions for the existing trade factory
+     */
+    function _removeTradeFactoryPermissions() internal {
+        noteToken.safeApprove(tradeFactory, 0);
+        weth.safeApprove(tradeFactory, 0);
+        tradeFactory = address(0);
+    }
+
      /*
      * @notice
      *  Public function used by the keeper to assess whether a harvest is necessary or not, 
@@ -960,15 +1012,15 @@ contract Strategy is BaseStrategy {
      * @param callCostInWei, call cost estimation performed by the keeper
      * @return bool, true when the strategy has a mature position
      */
-    function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
-        // Check whether there are still 12h to market roll
-        MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
-        if (_activeMarkets[0].maturity.sub(block.timestamp) < 12 * 3_600 
-            && vault.strategies(address(this)).debtRatio == 0
-            && nToken.balanceOf(address(this)) > 0 
-            ) {
-            return true;
-        }
-    } 
+    // function harvestTrigger(uint256 callCostInWei) public view override returns (bool) {
+    //     // Check whether there are still 12h to market roll
+    //     MarketParameters[] memory _activeMarkets = nProxy.getActiveMarkets(currencyID);
+    //     if (_activeMarkets[0].maturity.sub(block.timestamp) < 12 * 3_600 
+    //         && vault.strategies(address(this)).debtRatio == 0
+    //         && nToken.balanceOf(address(this)) > 0 
+    //         ) {
+    //         return true;
+    //     }
+    // } 
 
 }
