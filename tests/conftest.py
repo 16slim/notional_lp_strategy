@@ -1,6 +1,7 @@
 import pytest
 from brownie import config
 from brownie import Contract, interface
+from utils import utils
 
 # Function scoped isolation fixture to enable xdist.
 # Snapshots the chain before each test and reverts after test completion.
@@ -90,6 +91,24 @@ def balancer_vault():
 @pytest.fixture
 def balancer_note_weth_pool():
     yield "0x5f7fa48d765053f8dd85e052843e12d23e3d7bc50002000000000000000000c0"
+
+@pytest.fixture
+def trade_factory():
+    yield Contract("0x99d8679bE15011dEAD893EB4F5df474a4e6a8b29")
+
+@pytest.fixture
+def ymechs_safe():
+    yield Contract("0x2C01B4AD51a67E2d8F02208F54dF9aC4c0B778B6")
+
+@pytest.fixture
+def sushiswap_router():
+    yield Contract("0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F")
+
+@pytest.fixture()
+def multicall_swapper(interface):
+    yield interface.MultiCallOptimizedSwapper(
+        "0xB2F65F254Ab636C96fb785cc9B4485cbeD39CDAA"
+    )
 
 
 token_addresses = {
@@ -223,7 +242,8 @@ def live_vault(registry, token):
 
 @pytest.fixture
 def strategy(strategist, keeper, vault, rewards, Strategy, gov, \
-    notional_proxy, currencyID, balancer_vault, balancer_note_weth_pool, NotionalLpLib):
+    notional_proxy, currencyID, balancer_vault, balancer_note_weth_pool, 
+    NotionalLpLib, trade_factory, ymechs_safe):
     notional_lp_lib = strategist.deploy(NotionalLpLib)
     strategy = strategist.deploy(Strategy, vault, notional_proxy, \
         currencyID, balancer_vault.address, balancer_note_weth_pool)
@@ -246,6 +266,13 @@ def strategy(strategist, keeper, vault, rewards, Strategy, gov, \
 
     cloned_strategy.setToggleClaimRewards(True, {"from": gov})
     cloned_strategy.setDoHealthCheck(False, {"from": gov})
+
+    utils.prepare_trade_factory(
+        cloned_strategy,
+        trade_factory,
+        ymechs_safe,
+        gov
+        )
 
     yield cloned_strategy
 
