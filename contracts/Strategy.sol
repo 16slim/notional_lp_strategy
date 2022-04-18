@@ -735,9 +735,7 @@ contract Strategy is BaseStrategy {
      */
     function liquidateAllPositions() internal override returns (uint256) {
         if (toggleClaimRewards) {
-            uint256 claimableRewards = noteToken.balanceOf(address(this));
-            claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
-            if(claimableRewards > 0) {
+            if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 1) {
                 _claimRewards();
             }
         }
@@ -765,9 +763,7 @@ contract Strategy is BaseStrategy {
      */
     function prepareMigration(address _newStrategy) internal override {
         if (toggleClaimRewards) {
-            uint256 claimableRewards = noteToken.balanceOf(address(this));
-            claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
-            if(claimableRewards > 0) {
+            if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
                 _claimRewards();
             }
         }
