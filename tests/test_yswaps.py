@@ -24,8 +24,6 @@ def test_yswap_profitable_harvest(
     strategy.swapToWETHManually({"from": gov})
     
     if token != weth:
-        trade_factory.enable(weth, token, {"from":strategy})
-        weth.approve(trade_factory, 2 ** 256 - 1, {"from": strategy})
 
         token_in = weth
         token_out = token
@@ -75,4 +73,14 @@ def test_yswap_profitable_harvest(
 
     assert token.balanceOf(vault) > amount
     assert strategy.estimatedTotalAssets() == 0
-    
+
+def test_remove_trade_factory(
+    strategy, gov, trade_factory, note_token
+):
+    assert strategy.getTradeFactory() == trade_factory.address
+    assert note_token.allowance(strategy.address, trade_factory.address) > 0
+
+    strategy.removeTradeFactoryPermissions({'from': gov})
+
+    assert strategy.getTradeFactory() != trade_factory.address
+    assert note_token.allowance(strategy.address, trade_factory.address) == 0

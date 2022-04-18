@@ -979,7 +979,7 @@ contract Strategy is BaseStrategy {
         }
         // approve and set up trade factory
         noteToken.safeApprove(_tradeFactory, type(uint256).max);
-        weth.safeApprove(_tradeFactory, type(uint256).max);
+        IERC20(address(weth)).safeApprove(_tradeFactory, type(uint256).max);
         ITradeFactory tf = ITradeFactory(_tradeFactory);
         tf.enable(address(noteToken), address(want));
         tf.enable(address(weth), address(want));
@@ -1001,7 +1001,7 @@ contract Strategy is BaseStrategy {
      */
     function _removeTradeFactoryPermissions() internal {
         noteToken.safeApprove(tradeFactory, 0);
-        weth.safeApprove(tradeFactory, 0);
+        IERC20(address(weth)).safeApprove(tradeFactory, 0);
         tradeFactory = address(0);
     }
 
