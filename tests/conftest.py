@@ -144,7 +144,7 @@ currency_IDs = {
 
 thresholds = {
     "WETH": (1000e18, -500e8),
-    "DAI": (30e24, -30e14),
+    "DAI": (20e24, -20e14),
     "WBTC": (50e8, -50e8),
     "USDC": (20e12, -20e14),
 }
