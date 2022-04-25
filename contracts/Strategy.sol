@@ -155,7 +155,7 @@ contract Strategy is BaseStrategy {
         currencyID = _currencyID;
         nProxy = _nProxy;
 
-        (Token memory assetToken, Token memory underlying) = _nProxy.getCurrency(_currencyID);
+        (, Token memory underlying) = _nProxy.getCurrency(_currencyID);
         
         // By default claim rewards
         toggleClaimRewards = false;
@@ -238,7 +238,7 @@ contract Strategy is BaseStrategy {
      *  Sweep function only callable by governance to be able to sweep any ETH assigned to the strategy's balance
      */
     function sendETHToGovernance() external onlyGovernance {
-        (bool sent, bytes memory data) = governance().call{value: address(this).balance}("");
+        (bool sent,) = governance().call{value: address(this).balance}("");
         require(sent, "Failed to send Ether");
     }
 
@@ -577,7 +577,8 @@ contract Strategy is BaseStrategy {
         // Deposit all and mint all possible nTokens
         executeBalanceAction(
             DepositActionType.DepositUnderlyingAndMintNToken,
-            availableWantBalance
+            availableWantBalance,
+            true
         );
 
     }
@@ -638,7 +639,7 @@ contract Strategy is BaseStrategy {
         amountToLiquidate = amountToLiquidate.sub(lossesToBeRealised);
         
         // Minor gas savings
-        uint16 _currencyID = currencyID;
+        // uint16 _currencyID = currencyID;
         // Liquidate the proportional part of nTokens necessary
         // We calculate the number of tokens to redeem by calculating the % of assets to 
         // liquidate and applying that % to the # of nTokens held
@@ -656,7 +657,8 @@ contract Strategy is BaseStrategy {
             // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
             executeBalanceAction(
                 DepositActionType.RedeemNToken, 
-                tokensToRedeem
+                tokensToRedeem,
+                true
             );
         }
 
@@ -682,7 +684,8 @@ contract Strategy is BaseStrategy {
     function redeemNTokenAmount(uint256 amountToRedeem) external onlyVaultManagers {
         executeBalanceAction(
                     DepositActionType.RedeemNToken, 
-                    amountToRedeem
+                    amountToRedeem,
+                    true
                 );
     }
 
@@ -728,6 +731,43 @@ contract Strategy is BaseStrategy {
             redeemToUnderlying);
     }
 
+    function enterLeveragedPosition() public {
+
+        uint16 _currencyID = currencyID;
+        uint256 free_collateral = 0;
+        bytes32 trade = bytes32(0);
+
+        (, int256[] memory fc) = nProxy.getFreeCollateral(address(this));
+        for(uint8 i=0; i < 10; i++) {
+            if(fc[0] > 0) {
+                // calculate amount
+                free_collateral =  NotionalLpLib.assetToUnderlying(nProxy, currencyID, fc[0]);
+                // create borrow trade
+                trade = NotionalLpLib.encodeTrade(
+                    1, 
+                    1, 
+                    int88(free_collateral / 1e18 * 1e8), 
+                    0,
+                    nProxy,
+                    _currencyID
+                    );
+                // execute balance and trade
+                
+                // mint new tokens
+            } else {
+                break;
+            }
+        }
+    }
+
+    function exitLeveragedPosition(uint256 nTokens) external {
+        executeBalanceAction(
+                    DepositActionType.RedeemNToken, 
+                    nTokens,
+                    false
+                );
+    }
+
     /*
      * @notice
      *  Internal function used in emergency to close all active positions and liberate all assets
@@ -742,7 +782,8 @@ contract Strategy is BaseStrategy {
         uint256 nTokenBalance = nToken.balanceOf(address(this));
         executeBalanceAction(
                     DepositActionType.RedeemNToken, 
-                    nTokenBalance
+                    nTokenBalance,
+                    true
                 );
 
         return balanceOfWant();
@@ -811,9 +852,9 @@ contract Strategy is BaseStrategy {
      * @param newStrategy address where the contract of the new strategy is located
      * @param amount number of NOTE to migrate
      */
-    function transferNOTETokensManually (address newStrategy, uint256 amount) external onlyGovernance {
-        _transferNOTETokens(newStrategy, amount);
-    }
+    // function transferNOTETokensManually (address newStrategy, uint256 amount) external onlyGovernance {
+    //     _transferNOTETokens(newStrategy, amount);
+    // }
 
     /*
      * @notice
@@ -918,7 +959,8 @@ contract Strategy is BaseStrategy {
      */
     function executeBalanceAction(
         DepositActionType actionType,
-        uint256 depositActionAmount
+        uint256 depositActionAmount,
+        bool withdrawEntireCashBalance
         ) internal {
 
         uint16 _currencyID = currencyID;
@@ -934,7 +976,7 @@ contract Strategy is BaseStrategy {
             _currencyID,
             depositActionAmount,
             0,
-            true, 
+            withdrawEntireCashBalance, 
             true
         );
 
@@ -959,16 +1001,16 @@ contract Strategy is BaseStrategy {
      * @param _tradeFactory, Address of the trade factory to use
      */
     function setTradeFactory(address _tradeFactory) external onlyGovernance {
-        if (tradeFactory != address(0)) {
-            _removeTradeFactoryPermissions();
-        }
-        // approve and set up trade factory
-        noteToken.safeApprove(_tradeFactory, type(uint256).max);
-        IERC20(address(weth)).safeApprove(_tradeFactory, type(uint256).max);
-        ITradeFactory tf = ITradeFactory(_tradeFactory);
-        tf.enable(address(noteToken), address(want));
-        tf.enable(address(weth), address(want));
-        tradeFactory = _tradeFactory;
+        // if (tradeFactory != address(0)) {
+        //     _removeTradeFactoryPermissions();
+        // }
+        // // approve and set up trade factory
+        // noteToken.safeApprove(_tradeFactory, type(uint256).max);
+        // IERC20(address(weth)).safeApprove(_tradeFactory, type(uint256).max);
+        // ITradeFactory tf = ITradeFactory(_tradeFactory);
+        // tf.enable(address(noteToken), address(want));
+        // tf.enable(address(weth), address(want));
+        // tradeFactory = _tradeFactory;
     }
 
     /*
@@ -977,7 +1019,7 @@ contract Strategy is BaseStrategy {
      * for the existing trade factory
      */
     function removeTradeFactoryPermissions() external onlyEmergencyAuthorized {
-        _removeTradeFactoryPermissions();
+        // _removeTradeFactoryPermissions();
     }
 
     /*

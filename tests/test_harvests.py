@@ -14,12 +14,12 @@ def test_profitable_harvest(
     # Harvest 1: Send funds through the strategy
     chain.sleep(1)
     strategy.harvest({"from": strategist})
-
     amount_invested = vault.strategies(strategy)["totalDebt"]
 
     account = n_proxy_views.getAccount(strategy)
     amount_tokens = account[1][0][2]
 
+    assert 0
     assert amount_tokens > 0
     # assert 0
     assert pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX) == vault.strategies(strategy)["totalDebt"]

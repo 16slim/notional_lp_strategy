@@ -16,7 +16,7 @@ import "../interfaces/IWETH.sol";
 
 library NotionalLpLib {
     using SafeMath for uint256;
-    int256 private constant PRICE_DECIMALS = 1e18;
+    int256 public constant PRICE_DECIMALS = 1e18;
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
     struct NTokenTotalValueFromPortfolioVars {
@@ -111,16 +111,26 @@ library NotionalLpLib {
                 totalAssetCashClaim += assetCashClaim;
             }
 
-            (
-                Token memory assetToken,
-                Token memory underlyingToken,
-                ,
-                AssetRateParameters memory assetRate
-            ) = NTokenVars._nProxy.getCurrencyAndRates(NTokenVars._currencyID);
-            // 7. Convert the cToken position to underlying
-            totalUnderlyingClaim = uint256(totalAssetCashClaim * assetRate.rate / PRICE_DECIMALS);
+            totalUnderlyingClaim = assetToUnderlying(NTokenVars._nProxy, NTokenVars._currencyID, totalAssetCashClaim);
         }
     }
+
+    function assetToUnderlying(
+        NotionalProxy nProxy,
+        uint16 currencyID,
+        int256 amount
+    ) public view returns (uint256) {
+        
+        (
+            Token memory assetToken,
+            Token memory underlyingToken,
+            ,
+            AssetRateParameters memory assetRate
+        ) = nProxy.getCurrencyAndRates(currencyID);
+        
+        return uint256(amount * assetRate.rate / PRICE_DECIMALS);
+
+        }
 
     /*
      * @notice
@@ -269,6 +279,32 @@ library NotionalLpLib {
         ) = nProxy.getCurrencyAndRates(currencyID);
             
         return amount.mul(uint256(underlyingToken.decimals)).div(uint256(ethRate.rate));
+    }
+
+    function encodeTrade(
+        uint8 actionType,
+        uint8 marketIndex,
+        int88 underlyingAmount,
+        uint32 maxBorrowRate, // Set this to zero to allow any borrow rate,
+        NotionalProxy nProxy,
+        uint16 currencyID
+    ) public view returns (bytes32) {
+
+        int256 fCash = nProxy.getfCashAmountGivenCashAmount(
+            currencyID, 
+            underlyingAmount, 
+            marketIndex, 
+            now) * 95 / 100;
+
+        return
+            bytes32(
+                uint256(
+                    (actionType << 248) |
+                    (marketIndex << 240) |
+                    (fCash << 152) |
+                    (maxBorrowRate << 120)
+                )
+            );
     }
 
 }
