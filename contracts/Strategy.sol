@@ -580,6 +580,13 @@ contract Strategy is BaseStrategy {
             availableWantBalance
         );
 
+        if (currencyID == 1) {
+            // Only necessary for wETH/ ETH pair
+            weth.withdraw(availableWantBalance);
+        } else {
+            want.safeApprove(address(nProxy), 0);
+        }
+
     }
     
     /*

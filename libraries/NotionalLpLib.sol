@@ -17,6 +17,8 @@ import "../interfaces/IWETH.sol";
 library NotionalLpLib {
     using SafeMath for uint256;
     int256 private constant PRICE_DECIMALS = 1e18;
+    uint256 private constant SLIPPAGE_FACTOR = 9_800;
+    uint256 private constant MAX_BPS = 10_000;
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
 
     struct NTokenTotalValueFromPortfolioVars {
@@ -228,7 +230,7 @@ library NotionalLpLib {
                 path[0] = address(weth);
                 path[1] = address(want);
                 // Get expected number of tokens out
-                tokensOut = quoter.getAmountsOut(tokensOut, path)[1];
+                tokensOut = quoter.getAmountsOut(1, path)[1].mul(tokensOut).mul(SLIPPAGE_FACTOR).div(MAX_BPS);
             }
         }
 
