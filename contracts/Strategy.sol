@@ -442,6 +442,7 @@ contract Strategy is BaseStrategy {
      * @notice
      *  Function claiming the pending rewards for the strategy (if any) to be swapped in yswaps
      * @return uint256, value containing the current valuation of accumulakted rewards
+
      */
     function _claimRewards() internal returns(uint256) {
         return nProxy.nTokenClaimIncentives();
