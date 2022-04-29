@@ -14,7 +14,7 @@ def test_profitable_harvest(
     # Harvest 1: Send funds through the strategy
     chain.sleep(1)
     strategy.harvest({"from": strategist})
-
+    vault.updateStrategyMaxDebtPerHarvest(strategy, 0, {"from":gov})
     amount_invested = vault.strategies(strategy)["totalDebt"]
 
     account = n_proxy_views.getAccount(strategy)
