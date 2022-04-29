@@ -444,7 +444,7 @@ contract Strategy is BaseStrategy {
      * @return uint256, value containing the current valuation of accumulakted rewards
      */
     function _claimRewards() internal returns(uint256) {
-        nProxy.nTokenClaimIncentives();
+        return nProxy.nTokenClaimIncentives();
     }
 
     /*
