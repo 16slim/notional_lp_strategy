@@ -57,7 +57,7 @@ def test_avoid_idiosyncratic_period(
         vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
         strategy.setToggleClaimRewards(False, {"from": vault.governance()})
         strategy.setDoHealthCheck(False, {"from": gov})
-        actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
+        # actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
         tx = strategy.harvest({"from": gov})
         assert tx.events["Harvested"]["profit"] == 0
         assert tx.events["Harvested"]["loss"] == 0
