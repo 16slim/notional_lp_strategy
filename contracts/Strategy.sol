@@ -532,7 +532,7 @@ contract Strategy is BaseStrategy {
                     _profit = 0;
                     _debtPayment = amountAvailable;
                     // loss amount is not calculated here as it comes from the liquidate position assessment
-                    // if the toggle was set positions are freed if not, but it could be done in the next harvest
+                    // if the situation is not idiosyncratic positions are freed. If it is, it could be done in the next harvest
                 } else {
                     // NOTE: amountRequired is always equal or greater than _debtOutstanding
                     // important to use amountRequired just in case amountAvailable is > amountAvailable
