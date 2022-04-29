@@ -30,7 +30,8 @@ library NotionalLpLib {
 
     /*
      * @notice
-     *  Get the current value of the nToken LP position
+     *  Get the current value of the nToken LP position following the same methodology as in: 
+     *  https://github.com/notional-finance/sdk-v2/blob/master/src/system/NTokenValue.ts#L165-L171
      * @param NTokenVars, custom struct containing:
      * - _strategy, address of the strategy owning the position
      * - _nTokenAddress, address of the nToken to use
@@ -68,8 +69,9 @@ library NotionalLpLib {
             // Iterate over all active markets and sum value of each position 
             int256 fCashClaim = 0;
             int256 assetCashClaim = 0;
-            int256 totalAssetCashClaim = 0;
-            
+            (,,,,,int256 totalAssetCashClaim,,) = NTokenVars._nProxy.getNTokenAccount(NTokenVars._nTokenAddress);
+            totalAssetCashClaim = totalAssetCashClaim * nTokenBalance / totalSupply;
+
             // Process to get the current value of the position:
             // For each available market:
             // 1. Calculate the share of liquidity brought by the nToken by calculating the ratio between the 
