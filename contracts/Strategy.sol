@@ -457,8 +457,8 @@ contract Strategy is BaseStrategy {
      * as it's the primary exchange venue for NOTE (only a NOTE / WETH pool available)
      */
     function swapToWETHManually() external onlyVaultManagers {
+        _claimRewards();
         uint256 _incentives = noteToken.balanceOf(address(this));
-        _incentives += _claimRewards();
 
         if (_incentives > 0) {
             // Create the NOTE/WETH swap object for balancer
