@@ -251,7 +251,13 @@ contract Strategy is BaseStrategy {
      */
     function name() external view override returns (string memory) {
         // Add your own name here, suggestion e.g. "StrategyCreamYFI"
-        return "StrategyNotionalLp";
+        return
+            string(
+                abi.encodePacked(
+                    "StrategyNotionalLp",
+                    IERC20Metadata(address(want)).symbol()
+                )
+            );
     }
 
     /*
