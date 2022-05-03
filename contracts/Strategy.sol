@@ -157,7 +157,7 @@ contract Strategy is BaseStrategy {
 
         (Token memory assetToken, Token memory underlying) = _nProxy.getCurrency(_currencyID);
         
-        // By default claim rewards
+        // By default not claim rewards
         toggleClaimRewards = false;
 
         // Initialize NOTE token and nToken
