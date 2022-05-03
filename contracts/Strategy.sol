@@ -183,6 +183,7 @@ contract Strategy is BaseStrategy {
 
         // Set health check to health.ychad.eth
         healthCheck = 0xDDCea799fF1699e98EDF118e0629A974Df7DF012;
+        doHealthCheck = true;
     }
 
     /*
@@ -251,13 +252,7 @@ contract Strategy is BaseStrategy {
      */
     function name() external view override returns (string memory) {
         // Add your own name here, suggestion e.g. "StrategyCreamYFI"
-        return
-            string(
-                abi.encodePacked(
-                    "StrategyNotionalLp",
-                    IERC20Metadata(address(want)).symbol()
-                )
-            );
+        return "StrategyNotionalLp";
     }
 
     /*
