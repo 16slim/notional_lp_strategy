@@ -470,7 +470,7 @@ contract Strategy is BaseStrategy {
                 _incentives,
                 abi.encode(0)
             );
-            IERC20(address(noteToken)).safeApprove(address(balancerVault), _incentives);
+            _checkAllowance(address(balancerVault), noteToken, _incentives);
              // Swap the NOTE tokens to WETH
             balancerVault.swap(
                 swap, 
@@ -478,7 +478,7 @@ contract Strategy is BaseStrategy {
                 _incentives, 
                 now
                 );
-            IERC20(address(noteToken)).safeApprove(address(balancerVault), 0);
+            noteToken.safeApprove(address(balancerVault), 0);
         }
     }
 
@@ -575,7 +575,7 @@ contract Strategy is BaseStrategy {
             // Only necessary for wETH/ ETH pair
             weth.withdraw(availableWantBalance);
         } else {
-            want.safeApprove(address(notionalProxy), availableWantBalance);
+            _checkAllowance(address(notionalProxy), want, availableWantBalance);
         }
 
         // Deposit all and mint all possible nTokens
@@ -999,6 +999,25 @@ contract Strategy is BaseStrategy {
         noteToken.safeApprove(tradeFactory, 0);
         IERC20(address(weth)).safeApprove(tradeFactory, 0);
         tradeFactory = address(0);
+    }
+
+    /*
+     * @notice
+     *  Internal function checking if allowance is already enough for the contract
+     * and if not, safely sets it to max
+     * @param _contract, spender contract
+     * @param _token, token to approve spend
+     * @param _amount, _amoun to approve
+     */
+    function _checkAllowance(
+        address _contract,
+        IERC20 _token,
+        uint256 _amount
+    ) internal {
+        if (_token.allowance(address(this), _contract) < _amount) {
+            _token.safeApprove(_contract, 0);
+            _token.safeApprove(_contract, _amount);
+        }
     }
 
 }
