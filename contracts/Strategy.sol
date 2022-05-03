@@ -72,6 +72,8 @@ contract Strategy is BaseStrategy {
     ISushiRouter private constant quoter = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
     // Initialize WETH interface
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    // ETH currency ID
+    uint16 private constant ETH_CURRENCY_ID = 1;
     // To control when rewards are claimed 
     bool private shouldClaimRewards;
     // For cloning purposes
@@ -167,7 +169,7 @@ contract Strategy is BaseStrategy {
         forceMigration = false;
 
         // Check whether the currency is set up right
-        if (_currencyID == 1) {
+        if (_currencyID == ETH_CURRENCY_ID) {
             require(address(0) == underlying.tokenAddress); 
         } else {
             require(address(want) == underlying.tokenAddress);
@@ -568,7 +570,7 @@ contract Strategy is BaseStrategy {
             return;
         }
         
-        if (currencyID == 1) {
+        if (currencyID == ETH_CURRENCY_ID) {
             // Only necessary for wETH/ ETH pair
             weth.withdraw(availableWantBalance);
         } else {
@@ -581,7 +583,7 @@ contract Strategy is BaseStrategy {
             availableWantBalance
         );
 
-        if (currencyID == 1) {
+        if (currencyID == ETH_CURRENCY_ID) {
             // Only necessary for wETH/ ETH pair
             weth.withdraw(availableWantBalance);
         } else {
@@ -946,7 +948,7 @@ contract Strategy is BaseStrategy {
             true
         );
 
-        if (_currencyID == 1) {
+        if (_currencyID == ETH_CURRENCY_ID) {
             if (actionType == DepositActionType.DepositUnderlyingAndMintNToken) {
                 notionalProxy.batchBalanceAction{value: depositActionAmount}(address(this), actions);
             } else if (actionType == DepositActionType.RedeemNToken) {
