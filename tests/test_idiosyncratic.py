@@ -55,7 +55,7 @@ def test_avoid_idiosyncratic_period(
 
         # Harvesting doesn't do anything (only swapping rewards if we let it)
         vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-        strategy.setToggleClaimRewards(False, {"from": vault.governance()})
+        strategy.setShouldClaimRewards(False, {"from": vault.governance()})
         strategy.setDoHealthCheck(False, {"from": gov})
         # actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
         tx = strategy.harvest({"from": gov})
@@ -75,7 +75,7 @@ def test_avoid_idiosyncratic_period(
 
     #  Strategy can now be harvested noramally
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-    strategy.setToggleClaimRewards(True, {"from": vault.governance()})
+    strategy.setShouldClaimRewards(True, {"from": vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
     actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": gov})
@@ -134,7 +134,7 @@ def test_exit_during_idiosyncratic_period(
     assert account["accountBalances"][0][2] == 0
 
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-    strategy.setToggleClaimRewards(True, {"from": vault.governance()})
+    strategy.setShouldClaimRewards(True, {"from": vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
     actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": gov})

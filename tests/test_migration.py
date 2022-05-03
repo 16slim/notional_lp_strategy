@@ -46,7 +46,7 @@ def test_migration(
 
     # Migrate once again but only principal
     new_new_strategy = strategist.deploy(Strategy, vault, notional_proxy, currencyID, strategy.getBalancerVault(), balancer_note_weth_pool)
-    new_strategy.setToggleClaimRewards(False, {"from":gov})
+    new_strategy.setShouldClaimRewards(False, {"from":gov})
     new_new_strategy.setDoHealthCheck(False, {"from": gov})
 
     prev_rewards = new_strategy.getRewardsValue()
@@ -61,7 +61,7 @@ def test_migration(
     # create a profitable harvest
     actions.airdrop_amount_rewards(new_new_strategy, 500, note_token, note_whale)
     vault.updateStrategyDebtRatio(new_new_strategy, 0, {"from": gov})
-    new_new_strategy.setToggleClaimRewards(True, {"from":gov})
+    new_new_strategy.setShouldClaimRewards(True, {"from":gov})
     actions.sell_rewards_to_want(sushiswap_router, token, weth, new_new_strategy, gov, currencyID)
     # check that harvest work as expected
     tx = new_new_strategy.harvest({"from": gov})

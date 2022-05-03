@@ -73,7 +73,7 @@ contract Strategy is BaseStrategy {
     // Initialize WETH interface
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // To control when rewards are claimed 
-    bool private toggleClaimRewards;
+    bool private shouldClaimRewards;
     // For cloning purposes
     bool private isOriginal = true;
     // To control whether migrations try to get positions out of notional
@@ -158,7 +158,7 @@ contract Strategy is BaseStrategy {
         (Token memory assetToken, Token memory underlying) = _notionalProxy.getCurrency(_currencyID);
         
         // By default not claim rewards
-        toggleClaimRewards = false;
+        shouldClaimRewards = false;
 
         // Initialize NOTE token and nToken
         _updateNotionalAddresses();
@@ -255,10 +255,10 @@ contract Strategy is BaseStrategy {
     /*
      * @notice
      *  Getter function for the toggle defining whether to swap rewards or not
-     * @return bool, current toggleClaimRewards state variable
+     * @return bool, current shouldClaimRewards state variable
      */
-    function getToggleClaimRewards() external view returns(bool) {
-        return toggleClaimRewards;
+    function getShouldClaimRewards() external view returns(bool) {
+        return shouldClaimRewards;
     }
 
     /*
@@ -322,8 +322,8 @@ contract Strategy is BaseStrategy {
      * only accessible to vault managers
      * @param _newToggle, new booelan value for the toggle
      */
-    function setToggleClaimRewards(bool _newToggle) external onlyVaultManagers {
-        toggleClaimRewards = _newToggle;
+    function setShouldClaimRewards(bool _newToggle) external onlyVaultManagers {
+        shouldClaimRewards = _newToggle;
     }
 
     /*
@@ -496,7 +496,7 @@ contract Strategy is BaseStrategy {
             uint256 _debtPayment
         )
     {   
-        if (toggleClaimRewards) {
+        if (shouldClaimRewards) {
             // Get all possible rewards to th strategy (in want)
             _claimRewards();
         }
@@ -742,7 +742,7 @@ contract Strategy is BaseStrategy {
      * @return uint256 amountLiquidated, the total amount liquidated
      */
     function liquidateAllPositions() internal override returns (uint256) {
-        if (toggleClaimRewards) {
+        if (shouldClaimRewards) {
             if(notionalProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
                 _claimRewards();
             }
@@ -770,7 +770,7 @@ contract Strategy is BaseStrategy {
      * @param _newStrategy address where the contract of the new strategy is located
      */
     function prepareMigration(address _newStrategy) internal override {
-        if (toggleClaimRewards) {
+        if (shouldClaimRewards) {
             if(notionalProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
                 _claimRewards();
             }

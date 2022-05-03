@@ -43,7 +43,7 @@ def test_force_migration(
 
     # prevent the strategy form executing any code with the ntoken
     strategy.setForceMigration(True, {"from": gov})
-    strategy.setToggleClaimRewards(False, {"from":gov})
+    strategy.setShouldClaimRewards(False, {"from":gov})
     # migrate all tokens to the new strat
     vault.migrateStrategy(strategy, new_strategy, {"from":gov})
 
@@ -55,7 +55,7 @@ def test_force_migration(
     # give it all back to the vault
     vault.updateStrategyDebtRatio(new_strategy, 0, {"from":gov})
     new_strategy.setDoHealthCheck(False, {"from": gov})
-    new_strategy.setToggleClaimRewards(True, {"from":gov})
+    new_strategy.setShouldClaimRewards(True, {"from":gov})
     actions.sell_rewards_to_want(sushiswap_router, token, weth, new_strategy, gov, currencyID)
     new_strategy.harvest({"from":gov})
 
@@ -94,7 +94,7 @@ def test_force_liquidation(
     strategy.redeemNTokenAmount(n_proxy_views.getAccount(strategy)[1][0][2], {"from": gov})
     
     # Swap all rewards
-    strategy.setToggleClaimRewards(True, {"from":gov})
+    strategy.setShouldClaimRewards(True, {"from":gov})
     actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
 
     assert n_proxy_views.getAccount(strategy)[1][0][2] == 0
@@ -131,7 +131,7 @@ def test_emergency_exit(
     amount_tokens = account[1][0][2]
 
     strategy.setEmergencyExit({"from":gov})
-    strategy.setToggleClaimRewards(True, {"from":gov})
+    strategy.setShouldClaimRewards(True, {"from":gov})
     strategy.setDoHealthCheck(False, {"from": gov})
     actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from":gov})
