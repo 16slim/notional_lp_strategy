@@ -24,7 +24,7 @@ library NotionalLpLib {
     struct NTokenTotalValueFromPortfolioVars {
         address _strategy;
         address _nTokenAddress;
-        NotionalProxy _nProxy;
+        NotionalProxy _notionalProxy;
         uint16 _currencyID;
     }
 
@@ -35,7 +35,7 @@ library NotionalLpLib {
      * @param NTokenVars, custom struct containing:
      * - _strategy, address of the strategy owning the position
      * - _nTokenAddress, address of the nToken to use
-     * - _nProxy, address of the Notional Proxy
+     * - _notionalProxy, address of the Notional Proxy
      * - _currencyID, currency ID of the strategy
      * @return uint256 totalUnderlyingClaim, total number of want tokens
      */
@@ -45,31 +45,31 @@ library NotionalLpLib {
         
         // If the nToken has an idiosyncratic position we are in the 24h lock period and cannot calculate the 
         // portfolio value as there is an fcash position without market
-        if (checkIdiosyncratic(NTokenVars._nProxy, NTokenVars._currencyID, NTokenVars._nProxy.nTokenAddress(NTokenVars._currencyID))) {
+        if (checkIdiosyncratic(NTokenVars._notionalProxy, NTokenVars._currencyID, NTokenVars._notionalProxy.nTokenAddress(NTokenVars._currencyID))) {
             return 0;
         }
 
         // First step, get how many nTokens the strategy owns
-        (, int256 nTokenBalance, ) = NTokenVars._nProxy.getAccountBalance(NTokenVars._currencyID, NTokenVars._strategy);
+        (, int256 nTokenBalance, ) = NTokenVars._notionalProxy.getAccountBalance(NTokenVars._currencyID, NTokenVars._strategy);
 
         if (nTokenBalance > 0) {
             // Get the current portfolio of the nToken that provided liquidity to the different pools:
             // - liquidity tokens provided to each pool
             // - current fcash position in each pool
-            (PortfolioAsset[] memory liquidityTokens, PortfolioAsset[] memory netfCashAssets) = NTokenVars._nProxy.getNTokenPortfolio(NTokenVars._nTokenAddress);
+            (PortfolioAsset[] memory liquidityTokens, PortfolioAsset[] memory netfCashAssets) = NTokenVars._notionalProxy.getNTokenPortfolio(NTokenVars._nTokenAddress);
             // Get the current state of the active markets, notably:
             // - # of liquidity tokens used to provide liquidity to each market
             // - current # of asset tokens available in each market
             // - current # of fcash tokens available in each market
-            MarketParameters[] memory _activeMarkets = NTokenVars._nProxy.getActiveMarkets(NTokenVars._currencyID);
+            MarketParameters[] memory _activeMarkets = NTokenVars._notionalProxy.getActiveMarkets(NTokenVars._currencyID);
             
             // Total number of nTokens available, used to calculate the share of the strategy
-            int256 totalSupply = int256(NTokenVars._nProxy.nTokenTotalSupply(NTokenVars._nTokenAddress));
+            int256 totalSupply = int256(NTokenVars._notionalProxy.nTokenTotalSupply(NTokenVars._nTokenAddress));
 
             // Iterate over all active markets and sum value of each position 
             int256 fCashClaim = 0;
             int256 assetCashClaim = 0;
-            (,,,,,int256 totalAssetCashClaim,,) = NTokenVars._nProxy.getNTokenAccount(NTokenVars._nTokenAddress);
+            (,,,,,int256 totalAssetCashClaim,,) = NTokenVars._notionalProxy.getNTokenAccount(NTokenVars._nTokenAddress);
             totalAssetCashClaim = totalAssetCashClaim * nTokenBalance / totalSupply;
 
             // Process to get the current value of the position:
@@ -97,12 +97,12 @@ library NotionalLpLib {
 
                 if (fCashClaim != 0) {
                     uint256 mIndex = getMarketIndexForMaturity(
-                        NTokenVars._nProxy,
+                        NTokenVars._notionalProxy,
                         NTokenVars._currencyID,
                         liquidityTokens[i].maturity
                         );
                     // 5. Convert the netfcash claim to cTokens
-                    (int256 assetInternalNotation,) = NTokenVars._nProxy.getCashAmountGivenfCashAmount(
+                    (int256 assetInternalNotation,) = NTokenVars._notionalProxy.getCashAmountGivenfCashAmount(
                         NTokenVars._currencyID,
                         int88(-fCashClaim),
                         mIndex,
@@ -120,7 +120,7 @@ library NotionalLpLib {
                 Token memory underlyingToken,
                 ,
                 AssetRateParameters memory assetRate
-            ) = NTokenVars._nProxy.getCurrencyAndRates(NTokenVars._currencyID);
+            ) = NTokenVars._notionalProxy.getCurrencyAndRates(NTokenVars._currencyID);
             // 7. Convert the cToken position to underlying
             totalUnderlyingClaim = uint256(totalAssetCashClaim * assetRate.rate / PRICE_DECIMALS);
         }
@@ -129,17 +129,17 @@ library NotionalLpLib {
     /*
      * @notice
      *  Get the market index for a specific maturity
-     * @param _nProxy, Notional proxy address
+     * @param _notionalProxy, Notional proxy address
      * @param _currencyID, Currency ID of the strategy
      * @param _maturity, Maturity to look for
      * @return uint256 index of the market we're looking for
      */
     function getMarketIndexForMaturity(
-        NotionalProxy _nProxy,
+        NotionalProxy _notionalProxy,
         uint16 _currencyID,
         uint256 _maturity
     ) internal view returns(uint256) {
-        MarketParameters[] memory _activeMarkets = _nProxy.getActiveMarkets(_currencyID);
+        MarketParameters[] memory _activeMarkets = _notionalProxy.getActiveMarkets(_currencyID);
         bool success = false;
         for(uint256 j=0; j<_activeMarkets.length; j++){
             if(_maturity == _activeMarkets[j].maturity) {
@@ -156,20 +156,20 @@ library NotionalLpLib {
      * @notice
      *  Check whether the nToken has an idiosyncratic fcash position (non-opeable market) by looping through
      * the nToken positions (max is 3) and check whether it has a current active market or not
-     * @param _nProxy, Notional proxy address
+     * @param _notionalProxy, Notional proxy address
      * @param _currencyID, Currency ID of the strategy
      * @param _nTokenAddress, Address for the nToken
      * @return bool indicating whether the nToken has an idiosyncratic position or not
      */
     function checkIdiosyncratic(
-        NotionalProxy _nProxy,
+        NotionalProxy _notionalProxy,
         uint16 _currencyID,
         address _nTokenAddress
     ) public view returns(bool) {
-        MarketParameters[] memory _activeMarkets = _nProxy.getActiveMarkets(_currencyID);
-        (, PortfolioAsset[] memory netfCashAssets) = _nProxy.getNTokenPortfolio(_nTokenAddress);
+        MarketParameters[] memory _activeMarkets = _notionalProxy.getActiveMarkets(_currencyID);
+        (, PortfolioAsset[] memory netfCashAssets) = _notionalProxy.getNTokenPortfolio(_nTokenAddress);
         for(uint256 i=0; i<netfCashAssets.length; i++){
-            if(getMarketIndexForMaturity(_nProxy, _currencyID, netfCashAssets[i].maturity) == 0) {
+            if(getMarketIndexForMaturity(_notionalProxy, _currencyID, netfCashAssets[i].maturity) == 0) {
                 return true;
             }
         }
@@ -181,7 +181,7 @@ library NotionalLpLib {
      *  External view estimating the rewards value in want tokens. We simulate the trade in balancer to 
      * get WETH from the NOTE / WETH pool and if want is not weth, we simulate a trade in sushi to obtain want tokens 
      * @param noteToken, rewards token to estimate value
-     * @param nProxy, notional proxy distributing the rewards
+     * @param notionalProxy, notional proxy distributing the rewards
      * @param balancerVault, vault address in Balancer to simulate the swap
      * @param poolId, identifier NOTE/weth pool in balancer
      * @param currencyID, identifier of the currency operated in the strategy
@@ -191,7 +191,7 @@ library NotionalLpLib {
      */
     function getRewardsValue(
         IERC20 noteToken,
-        NotionalProxy nProxy,
+        NotionalProxy notionalProxy,
         IBalancerVault balancerVault,
         bytes32 poolId,
         IBalancerPool balancerPool,
@@ -201,7 +201,7 @@ library NotionalLpLib {
     ) external view returns(uint256 tokensOut) {
         // Get NOTE rewards
         uint256 claimableRewards = noteToken.balanceOf(address(this));
-        claimableRewards += nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+        claimableRewards += notionalProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
         if (claimableRewards > 0) {
             (IERC20[] memory tokens,
             uint256[] memory balances,
@@ -243,14 +243,14 @@ library NotionalLpLib {
      *  Function exchanging between ETH to 'want'
      * @param amount, Amount to exchange
      * @param asset, 'want' asset to exchange to
-     * @param nProxy, Notional Proxu address
+     * @param notionalProxy, Notional Proxu address
      * @param currendyID, ID of want
      * @return uint256 result, the equivalent ETH amount in 'want' tokens
      */
     function fromETH(
         uint256 amount,
         address asset,
-        NotionalProxy nProxy,
+        NotionalProxy notionalProxy,
         uint16 currencyID
         )
         external
@@ -270,7 +270,7 @@ library NotionalLpLib {
             Token memory underlyingToken,
             ETHRate memory ethRate,
             AssetRateParameters memory assetRate
-        ) = nProxy.getCurrencyAndRates(currencyID);
+        ) = notionalProxy.getCurrencyAndRates(currencyID);
             
         return amount.mul(uint256(underlyingToken.decimals)).div(uint256(ethRate.rate));
     }

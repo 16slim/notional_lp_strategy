@@ -31,7 +31,7 @@ def test_clone(
             strategist, 
             strategy.rewards(), 
             strategy.keeper(), 
-            strategy.nProxy(), 
+            strategy.notionalProxy(), 
             currencyID, 
             balancer_vault, 
             balancer_note_weth_pool, 

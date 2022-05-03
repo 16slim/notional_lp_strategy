@@ -53,7 +53,7 @@ contract Strategy is BaseStrategy {
     using SafeMath for uint256;
 
     // NotionalContract: proxy that points to a router with different implementations depending on function 
-    NotionalProxy public nProxy;
+    NotionalProxy public notionalProxy;
     // NOTE token for rewards
     IERC20 private noteToken;
     // Address of the nToken we interact with
@@ -87,7 +87,7 @@ contract Strategy is BaseStrategy {
      * @notice constructor for the contract, called at deployment, calls the initializer function used for 
      * cloning strategies
      * @param _vault Address of the corresponding vault the contract reports to
-     * @param _nProxy Notional proxy used to interact with the protocol
+     * @param _notionalProxy Notional proxy used to interact with the protocol
      * @param _currencyID Notional identifier of the currency (token) the strategy interacts with:
      * 1 - ETH
      * 2 - DAI
@@ -98,12 +98,12 @@ contract Strategy is BaseStrategy {
      */
     constructor(
         address _vault,
-        NotionalProxy _nProxy,
+        NotionalProxy _notionalProxy,
         uint16 _currencyID,
         address _balancerVault,
         bytes32 _poolId 
     ) public BaseStrategy (_vault) {
-        _initializeNotionalStrategy(_nProxy, _currencyID, _balancerVault, _poolId);
+        _initializeNotionalStrategy(_notionalProxy, _currencyID, _balancerVault, _poolId);
     }
 
     /*
@@ -112,7 +112,7 @@ contract Strategy is BaseStrategy {
      * @param _strategist Strategist managing the strategy
      * @param _rewards Rewards address
      * @param _keeper Keeper address
-     * @param _nProxy Notional proxy used to interact with the protocol
+     * @param _notionalProxy Notional proxy used to interact with the protocol
      * @param _currencyID Notional identifier of the currency (token) the strategy interacts with:
      * 1 - ETH
      * 2 - DAI
@@ -126,18 +126,18 @@ contract Strategy is BaseStrategy {
         address _strategist,
         address _rewards,
         address _keeper,
-        NotionalProxy _nProxy,
+        NotionalProxy _notionalProxy,
         uint16 _currencyID,
         address _balancerVault,
         bytes32 _poolId
     ) external {
         _initialize(_vault, _strategist, _rewards, _keeper);
-        _initializeNotionalStrategy(_nProxy, _currencyID, _balancerVault, _poolId);
+        _initializeNotionalStrategy(_notionalProxy, _currencyID, _balancerVault, _poolId);
     }
 
     /*
      * @notice Internal initializer for the Notional Strategy contract
-     * @param _nProxy Notional proxy used to interact with the protocol
+     * @param _notionalProxy Notional proxy used to interact with the protocol
      * @param _currencyID Notional identifier of the currency (token) the strategy interacts with:
      * 1 - ETH
      * 2 - DAI
@@ -147,15 +147,15 @@ contract Strategy is BaseStrategy {
      * @param _poolId 32 bytes identifier of the NOTE/WETH balancer pool to use
      */
     function _initializeNotionalStrategy (
-        NotionalProxy _nProxy,
+        NotionalProxy _notionalProxy,
         uint16 _currencyID,
         address _balancerVault,
         bytes32 _poolId
     ) internal {
         currencyID = _currencyID;
-        nProxy = _nProxy;
+        notionalProxy = _notionalProxy;
 
-        (Token memory assetToken, Token memory underlying) = _nProxy.getCurrency(_currencyID);
+        (Token memory assetToken, Token memory underlying) = _notionalProxy.getCurrency(_currencyID);
         
         // By default not claim rewards
         toggleClaimRewards = false;
@@ -190,7 +190,7 @@ contract Strategy is BaseStrategy {
      * @param _strategist Strategist managing the strategy
      * @param _rewards Rewards address
      * @param _keeper Keeper address
-     * @param _nProxy Notional proxy used to interact with the protocol
+     * @param _notionalProxy Notional proxy used to interact with the protocol
      * @param _currencyID Notional identifier of the currency (token) the strategy interacts with:
      * 1 - ETH
      * 2 - DAI
@@ -204,7 +204,7 @@ contract Strategy is BaseStrategy {
         address _strategist,
         address _rewards,
         address _keeper,
-        NotionalProxy _nProxy,
+        NotionalProxy _notionalProxy,
         uint16 _currencyID,
         address _balancerVault,
         bytes32 _poolId
@@ -223,7 +223,7 @@ contract Strategy is BaseStrategy {
         }
 
         Strategy(newStrategy).initialize(_vault, 
-            _strategist, _rewards, _keeper, _nProxy, _currencyID,
+            _strategist, _rewards, _keeper, _notionalProxy, _currencyID,
             _balancerVault, _poolId
             );
 
@@ -400,8 +400,8 @@ contract Strategy is BaseStrategy {
      */
     function _updateNotionalAddresses() internal {
         // Initialize NOTE token and nToken
-        noteToken = IERC20(nProxy.getNoteToken());
-        nToken = nTokenERC20(nProxy.nTokenAddress(currencyID));
+        noteToken = IERC20(notionalProxy.getNoteToken());
+        nToken = nTokenERC20(notionalProxy.nTokenAddress(currencyID));
     }
 
     /*
@@ -435,7 +435,7 @@ contract Strategy is BaseStrategy {
      * @return bool, value containing if there is an idiosyncratic position or not
      */
     function checkIdiosyncratic() external view returns(bool){
-        return NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken));
+        return NotionalLpLib.checkIdiosyncratic(notionalProxy, currencyID, address(nToken));
     }
 
     /*
@@ -445,7 +445,7 @@ contract Strategy is BaseStrategy {
 
      */
     function _claimRewards() internal returns(uint256) {
-        return nProxy.nTokenClaimIncentives();
+        return notionalProxy.nTokenClaimIncentives();
     }
 
     /*
@@ -514,7 +514,7 @@ contract Strategy is BaseStrategy {
             // we are not withdrawing 100% of position)
             uint256 amountAvailable = wantBalance;
 
-            if (!NotionalLpLib.checkIdiosyncratic(nProxy, currencyID, address(nToken))) {
+            if (!NotionalLpLib.checkIdiosyncratic(notionalProxy, currencyID, address(nToken))) {
                 (amountAvailable, _loss) = liquidatePosition(amountRequired);
             }
             
@@ -572,7 +572,7 @@ contract Strategy is BaseStrategy {
             // Only necessary for wETH/ ETH pair
             weth.withdraw(availableWantBalance);
         } else {
-            want.safeApprove(address(nProxy), availableWantBalance);
+            want.safeApprove(address(notionalProxy), availableWantBalance);
         }
 
         // Deposit all and mint all possible nTokens
@@ -585,7 +585,7 @@ contract Strategy is BaseStrategy {
             // Only necessary for wETH/ ETH pair
             weth.withdraw(availableWantBalance);
         } else {
-            want.safeApprove(address(nProxy), 0);
+            want.safeApprove(address(notionalProxy), 0);
         }
 
     }
@@ -709,7 +709,7 @@ contract Strategy is BaseStrategy {
         bool sellTokenAssets,
         bool acceptResidualAssets
     ) external onlyVaultManagers returns (int256, bool){
-        return nProxy.nTokenRedeem(
+        return notionalProxy.nTokenRedeem(
             address(this), 
             currencyID, 
             tokensToRedeem, 
@@ -730,7 +730,7 @@ contract Strategy is BaseStrategy {
         uint88 amountInternalPrecision,
         bool redeemToUnderlying
     ) external onlyVaultManagers returns(uint256) {
-        return nProxy.withdraw(
+        return notionalProxy.withdraw(
             currencyID, 
             amountInternalPrecision, 
             redeemToUnderlying);
@@ -743,7 +743,7 @@ contract Strategy is BaseStrategy {
      */
     function liquidateAllPositions() internal override returns (uint256) {
         if (toggleClaimRewards) {
-            if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
+            if(notionalProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
                 _claimRewards();
             }
         }
@@ -771,7 +771,7 @@ contract Strategy is BaseStrategy {
      */
     function prepareMigration(address _newStrategy) internal override {
         if (toggleClaimRewards) {
-            if(nProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
+            if(notionalProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
                 _claimRewards();
             }
         }
@@ -856,7 +856,7 @@ contract Strategy is BaseStrategy {
         override
         returns (uint256)
     {
-        return NotionalLpLib.fromETH(amtInWei, address(want), nProxy, currencyID);
+        return NotionalLpLib.fromETH(amtInWei, address(want), notionalProxy, currencyID);
     }
 
     // INTERNAL FUNCTIONS
@@ -871,7 +871,7 @@ contract Strategy is BaseStrategy {
         // Call the view library
         return NotionalLpLib.getRewardsValue(
             noteToken,
-            nProxy,
+            notionalProxy,
             balancerVault,
             poolId,
             balancerPool,
@@ -895,7 +895,7 @@ contract Strategy is BaseStrategy {
                 NotionalLpLib.NTokenTotalValueFromPortfolioVars(
                     address(this), 
                     nTokenAddress,
-                    nProxy,
+                    notionalProxy,
                     currencyID
                 )
             );
@@ -931,7 +931,7 @@ contract Strategy is BaseStrategy {
 
         uint16 _currencyID = currencyID;
         // Handle the 24h protection window where an nToken may have an idiosyncratic position
-        if (NotionalLpLib.checkIdiosyncratic(nProxy, _currencyID, address(nToken))) {
+        if (NotionalLpLib.checkIdiosyncratic(notionalProxy, _currencyID, address(nToken))) {
             return;
         }
 
@@ -948,13 +948,13 @@ contract Strategy is BaseStrategy {
 
         if (_currencyID == 1) {
             if (actionType == DepositActionType.DepositUnderlyingAndMintNToken) {
-                nProxy.batchBalanceAction{value: depositActionAmount}(address(this), actions);
+                notionalProxy.batchBalanceAction{value: depositActionAmount}(address(this), actions);
             } else if (actionType == DepositActionType.RedeemNToken) {
-                nProxy.batchBalanceAction(address(this), actions);
+                notionalProxy.batchBalanceAction(address(this), actions);
             }
             weth.deposit{value: address(this).balance}();
         } else {
-            nProxy.batchBalanceAction(address(this), actions);
+            notionalProxy.batchBalanceAction(address(this), actions);
         }
     }
 
