@@ -750,10 +750,10 @@ contract Strategy is BaseStrategy {
                 _claimRewards();
             }
         }
-        uint256 nTokenBalance = nToken.balanceOf(address(this));
+        
         executeBalanceAction(
                     DepositActionType.RedeemNToken, 
-                    nTokenBalance
+                    nToken.balanceOf(address(this))
                 );
 
         return balanceOfWant();
@@ -892,12 +892,11 @@ contract Strategy is BaseStrategy {
      * @return uint256 _totalWantValue, the total amount of 'want' tokens of the strategy's positions
      */
     function _getNTokenTotalValueFromPortfolio() internal view returns(uint256 totalUnderlyingClaim) {
-        address nTokenAddress = address(nToken);
 
         return NotionalLpLib.getNTokenTotalValueFromPortfolio(
                 NotionalLpLib.NTokenTotalValueFromPortfolioVars(
                     address(this), 
-                    nTokenAddress,
+                    address(nToken),
                     notionalProxy,
                     currencyID
                 )
