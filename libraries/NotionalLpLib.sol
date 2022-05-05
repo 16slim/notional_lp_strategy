@@ -7,6 +7,7 @@ pragma experimental ABIEncoderV2;
 import "../interfaces/notional/NotionalProxy.sol";
 import "../interfaces/notional/nTokenERC20.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/math/SignedSafeMath.sol";
 import {
     IERC20
 } from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
@@ -16,6 +17,7 @@ import "../interfaces/IWETH.sol";
 
 library NotionalLpLib {
     using SafeMath for uint256;
+    using SignedSafeMath for int256;
     int256 private constant PRICE_DECIMALS = 1e18;
     uint256 private constant SLIPPAGE_FACTOR = 9_800;
     uint256 private constant MAX_BPS = 10_000;
@@ -70,7 +72,7 @@ library NotionalLpLib {
             int256 fCashClaim = 0;
             int256 assetCashClaim = 0;
             (,,,,,int256 totalAssetCashClaim,,) = NTokenVars._notionalProxy.getNTokenAccount(NTokenVars._nTokenAddress);
-            totalAssetCashClaim = totalAssetCashClaim * nTokenBalance / totalSupply;
+            totalAssetCashClaim = totalAssetCashClaim.mul(nTokenBalance).div(totalSupply);
 
             // Process to get the current value of the position:
             // For each available market:
@@ -85,15 +87,15 @@ library NotionalLpLib {
             // 7. Convert to underlying
             for(uint256 i = 0; i < liquidityTokens.length; i++) {
                 // 1-2. Calculate the fcash claim on the market using liquidity tokens share
-                fCashClaim = liquidityTokens[i].notional * _activeMarkets[i].totalfCash / _activeMarkets[i].totalLiquidity;
+                fCashClaim = liquidityTokens[i].notional.mul(_activeMarkets[i].totalfCash).div(_activeMarkets[i].totalLiquidity);
                 // 1-2. Calculate the cTokens claim on the market using liquidity tokens share
-                assetCashClaim = liquidityTokens[i].notional * _activeMarkets[i].totalAssetCash / _activeMarkets[i].totalLiquidity;
+                assetCashClaim = liquidityTokens[i].notional.mul(_activeMarkets[i].totalAssetCash).div(_activeMarkets[i].totalLiquidity);
                 // 3. Net the fcash share against the current fcash position of the nToken
                 fCashClaim += netfCashAssets[i].notional;
                 // 4. Calculate the strategy's share of fcash claim
-                fCashClaim = fCashClaim * nTokenBalance / totalSupply;
+                fCashClaim = fCashClaim.mul(nTokenBalance).div(totalSupply);
                 // 4. Calculate the strategy's share of cToken claim
-                assetCashClaim = assetCashClaim * nTokenBalance / totalSupply;
+                assetCashClaim = assetCashClaim.mul(nTokenBalance).div(totalSupply);
 
                 if (fCashClaim != 0) {
                     uint256 mIndex = getMarketIndexForMaturity(
@@ -109,10 +111,10 @@ library NotionalLpLib {
                         block.timestamp
                     );
                     // 5. Add it to the cToken share of market liquidity
-                    assetCashClaim += assetInternalNotation;
+                    assetCashClaim = assetCashClaim.add(assetInternalNotation);
                 }
                 // 6. Add positions for each market
-                totalAssetCashClaim += assetCashClaim;
+                totalAssetCashClaim = totalAssetCashClaim.add(assetCashClaim);
             }
 
             (
@@ -122,7 +124,7 @@ library NotionalLpLib {
                 AssetRateParameters memory assetRate
             ) = NTokenVars._notionalProxy.getCurrencyAndRates(NTokenVars._currencyID);
             // 7. Convert the cToken position to underlying
-            totalUnderlyingClaim = uint256(totalAssetCashClaim * assetRate.rate / PRICE_DECIMALS);
+            totalUnderlyingClaim = uint256(totalAssetCashClaim.mul(assetRate.rate).div(PRICE_DECIMALS));
         }
     }
 
