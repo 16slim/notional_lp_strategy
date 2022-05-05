@@ -527,7 +527,7 @@ contract Strategy is BaseStrategy {
                 // In case we liberate a higher amount than needed (liquidatePosition uses the estimation of
                 // the value in the portfolio + performs a proportion), we avoid declaring as profit
                 // part of the principal position
-                _profit = Math.min(amountAvailable.sub(_debtOutstanding), amountRequired.sub(_debtPayment));
+                _profit = amountRequired.sub(_debtPayment);
             } else {
                 // we were not able to free enough funds
                 if(amountAvailable < _debtOutstanding) {
@@ -673,13 +673,10 @@ contract Strategy is BaseStrategy {
 
         // Assess result 
         uint256 totalAssets = balanceOfWant();
+        _liquidatedAmount = Math.min(totalAssets, _amountNeeded);
         if (_amountNeeded > totalAssets) {
-            _liquidatedAmount = totalAssets;
             // _loss should be equal to lossesToBeRealised ! 
-            _loss = _amountNeeded.sub(totalAssets);
-            
-        } else {
-            _liquidatedAmount = totalAssets;
+            _loss = _amountNeeded.sub(totalAssets);   
         }
 
     }
