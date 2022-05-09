@@ -22,12 +22,23 @@ library NotionalLpLib {
     uint256 private constant SLIPPAGE_FACTOR = 9_800;
     uint256 private constant MAX_BPS = 10_000;
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    uint256 private constant WETH_DECIMALS = 1e18;
 
     struct NTokenTotalValueFromPortfolioVars {
         address _strategy;
         address _nTokenAddress;
         NotionalProxy _notionalProxy;
         uint16 _currencyID;
+    }
+    struct RewardsValueVars {
+        IERC20 noteToken;
+        NotionalProxy notionalProxy;
+        IBalancerVault balancerVault;
+        bytes32 poolId;
+        IBalancerPool balancerPool;
+        uint16 currencyID;
+        ISushiRouter quoter;
+        address want;
     }
 
     /*
@@ -86,35 +97,37 @@ library NotionalLpLib {
             // 6. Add the cToken position for each market
             // 7. Convert to underlying
             for(uint256 i = 0; i < liquidityTokens.length; i++) {
-                // 1-2. Calculate the fcash claim on the market using liquidity tokens share
-                fCashClaim = liquidityTokens[i].notional.mul(_activeMarkets[i].totalfCash).div(_activeMarkets[i].totalLiquidity);
-                // 1-2. Calculate the cTokens claim on the market using liquidity tokens share
-                assetCashClaim = liquidityTokens[i].notional.mul(_activeMarkets[i].totalAssetCash).div(_activeMarkets[i].totalLiquidity);
-                // 3. Net the fcash share against the current fcash position of the nToken
-                fCashClaim += netfCashAssets[i].notional;
-                // 4. Calculate the strategy's share of fcash claim
-                fCashClaim = fCashClaim.mul(nTokenBalance).div(totalSupply);
-                // 4. Calculate the strategy's share of cToken claim
-                assetCashClaim = assetCashClaim.mul(nTokenBalance).div(totalSupply);
+                if(liquidityTokens[i].maturity == _activeMarkets[i].maturity) {
+                    // 1-2. Calculate the fcash claim on the market using liquidity tokens share
+                    fCashClaim = liquidityTokens[i].notional.mul(_activeMarkets[i].totalfCash).div(_activeMarkets[i].totalLiquidity);
+                    // 1-2. Calculate the cTokens claim on the market using liquidity tokens share
+                    assetCashClaim = liquidityTokens[i].notional.mul(_activeMarkets[i].totalAssetCash).div(_activeMarkets[i].totalLiquidity);
+                    // 3. Net the fcash share against the current fcash position of the nToken
+                    fCashClaim += netfCashAssets[i].notional;
+                    // 4. Calculate the strategy's share of fcash claim
+                    fCashClaim = fCashClaim.mul(nTokenBalance).div(totalSupply);
+                    // 4. Calculate the strategy's share of cToken claim
+                    assetCashClaim = assetCashClaim.mul(nTokenBalance).div(totalSupply);
 
-                if (fCashClaim != 0) {
-                    uint256 mIndex = getMarketIndexForMaturity(
-                        NTokenVars._notionalProxy,
-                        NTokenVars._currencyID,
-                        liquidityTokens[i].maturity
+                    if (fCashClaim != 0) {
+                        uint256 mIndex = getMarketIndexForMaturity(
+                            NTokenVars._notionalProxy,
+                            NTokenVars._currencyID,
+                            liquidityTokens[i].maturity
+                            );
+                        // 5. Convert the netfcash claim to cTokens
+                        (int256 assetInternalNotation,) = NTokenVars._notionalProxy.getCashAmountGivenfCashAmount(
+                            NTokenVars._currencyID,
+                            int88(-fCashClaim),
+                            mIndex,
+                            block.timestamp
                         );
-                    // 5. Convert the netfcash claim to cTokens
-                    (int256 assetInternalNotation,) = NTokenVars._notionalProxy.getCashAmountGivenfCashAmount(
-                        NTokenVars._currencyID,
-                        int88(-fCashClaim),
-                        mIndex,
-                        block.timestamp
-                    );
-                    // 5. Add it to the cToken share of market liquidity
-                    assetCashClaim = assetCashClaim.add(assetInternalNotation);
+                        // 5. Add it to the cToken share of market liquidity
+                        assetCashClaim = assetCashClaim.add(assetInternalNotation);
+                    }
+                    // 6. Add positions for each market
+                    totalAssetCashClaim = totalAssetCashClaim.add(assetCashClaim);
                 }
-                // 6. Add positions for each market
-                totalAssetCashClaim = totalAssetCashClaim.add(assetCashClaim);
             }
 
             (
@@ -192,49 +205,44 @@ library NotionalLpLib {
      * @return uint256 tokensOut, current number of want tokens the strategy would obtain for its rewards
      */
     function getRewardsValue(
-        IERC20 noteToken,
-        NotionalProxy notionalProxy,
-        IBalancerVault balancerVault,
-        bytes32 poolId,
-        IBalancerPool balancerPool,
-        uint16 currencyID,
-        ISushiRouter quoter,
-        address want
+        RewardsValueVars memory rewardsValueVars
     ) external view returns(uint256 tokensOut) {
         // Get NOTE rewards
-        uint256 claimableRewards = noteToken.balanceOf(address(this));
-        claimableRewards += notionalProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
+        uint256 claimableRewards = rewardsValueVars.noteToken.balanceOf(address(this));
+        claimableRewards += rewardsValueVars.notionalProxy.nTokenGetClaimableIncentives(address(this), block.timestamp);
         if (claimableRewards > 0) {
             (IERC20[] memory tokens,
             uint256[] memory balances,
-            uint256 lastChangeBlock) = balancerVault.getPoolTokens(poolId);
+            uint256 lastChangeBlock) = rewardsValueVars.balancerVault.getPoolTokens(rewardsValueVars.poolId);
             // Setup SwapRequest object for balancer
             IBalancerPool.SwapRequest memory swapRequest = IBalancerPool.SwapRequest(
                 IBalancerPool.SwapKind.GIVEN_IN,
                 tokens[1],
                 tokens[0],
                 claimableRewards,
-                poolId,
+                rewardsValueVars.poolId,
                 lastChangeBlock,
                 address(this),
                 address(this),
                 abi.encode(0)
             );
             // Simulate NOTE/WETH trade
-            tokensOut = balancerPool.onSwap(
+            tokensOut = rewardsValueVars.balancerPool.onSwap(
                 swapRequest, 
                 balances[1],
                 balances[0] 
             );
             
             // If want is not weth, simulate sushi trade
-            if(currencyID > 1) {
+            if(rewardsValueVars.currencyID > 1) {
                 // Sushi path is [weth, want]
                 address[] memory path = new address[](2);
                 path[0] = address(weth);
-                path[1] = address(want);
+                path[1] = address(rewardsValueVars.want);
                 // Get expected number of tokens out
-                tokensOut = quoter.getAmountsOut(1, path)[1].mul(tokensOut).mul(SLIPPAGE_FACTOR).div(MAX_BPS);
+                {
+                    tokensOut = rewardsValueVars.quoter.getAmountsOut(WETH_DECIMALS, path)[1].mul(tokensOut).mul(SLIPPAGE_FACTOR).div(MAX_BPS).div(WETH_DECIMALS);
+                }
             }
         }
 
