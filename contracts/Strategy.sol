@@ -537,8 +537,8 @@ contract Strategy is BaseStrategy {
                     // loss amount is not calculated here as it comes from the liquidate position assessment
                     // if the situation is not idiosyncratic positions are freed. If it is, it could be done in the next harvest
                 } else {
-                    // NOTE: amountRequired is always equal or greater than _debtOutstanding
-                    // important to use amountRequired just in case amountAvailable is > amountAvailable
+                    // NOTE: here amountAvailable is always equal or greater than _debtOutstanding
+                    // important to use amountAvailable as it's the real amount available as wamt
                     // We will not report and losses but pay the entire debtOutstanding and report the rest of
                     // amountAvailable as profit (therefore losses are 0 because we were able to pay debtPayment)
                     _debtPayment = _debtOutstanding;
