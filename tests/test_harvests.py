@@ -93,7 +93,7 @@ def test_lossy_harvest(
             symbol_collateral = "DAI"
         # Create impermanent loss by borrowing 10 million
         i = 1
-        while (i <= 10):
+        while (i <= 5):
             print("Whale borrowing million ", i)
             actions.borrow_1m_whales(n_proxy_implementation, currencyID, 
                 utils.get_token(symbol_collateral), n_proxy_batch, 
