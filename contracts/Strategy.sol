@@ -584,10 +584,7 @@ contract Strategy is BaseStrategy {
             availableWantBalance
         );
 
-        if (currencyID == ETH_CURRENCY_ID) {
-            // Only necessary for wETH/ ETH pair
-            weth.withdraw(availableWantBalance);
-        } else {
+        if (currencyID != ETH_CURRENCY_ID) {
             want.safeApprove(address(notionalProxy), 0);
         }
 
@@ -729,11 +726,14 @@ contract Strategy is BaseStrategy {
     function withdrawFromNotional(
         uint88 amountInternalPrecision,
         bool redeemToUnderlying
-    ) external onlyVaultManagers returns(uint256) {
-        return notionalProxy.withdraw(
+    ) external onlyVaultManagers returns(uint256 withdrawn) {
+        withdrawn = notionalProxy.withdraw(
             currencyID, 
             amountInternalPrecision, 
             redeemToUnderlying);
+        if (currencyID == ETH_CURRENCY_ID) {
+            weth.deposit{value: address(this).balance}();
+        }
     }
 
     /*
@@ -870,14 +870,16 @@ contract Strategy is BaseStrategy {
     function _getRewardsValue() internal view returns(uint256 tokensOut) {
         // Call the view library
         return NotionalLpLib.getRewardsValue(
-            noteToken,
-            notionalProxy,
-            balancerVault,
-            poolId,
-            balancerPool,
-            currencyID,
-            quoter,
-            address(want)
+            NotionalLpLib.RewardsValueVars(
+                noteToken,
+                notionalProxy,
+                balancerVault,
+                poolId,
+                balancerPool,
+                currencyID,
+                quoter,
+                address(want)
+            )
         );
 
     }
