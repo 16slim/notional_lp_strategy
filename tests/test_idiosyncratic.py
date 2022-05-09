@@ -110,7 +110,8 @@ def test_exit_during_idiosyncratic_period(
     chain.mine(1, timestamp = first_market + 1 )
     n_proxy_implementation.initializeMarkets(currencyID, False, {"from":accounts[0]})
 
-    assert strategy.checkIdiosyncratic() == True
+    if currencyID in [2, 3]:
+        assert strategy.checkIdiosyncratic() == True
 
     # Exit the startegy the wrong way
     tx = strategy.redeemIdiosyncratic(
