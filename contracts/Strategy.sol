@@ -255,6 +255,15 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
+     *  Getter function for the address of the nToken to use
+     * @return address, current nToken state variable
+     */
+    function getNTokenAddress() external view returns(address) {
+        return address(nToken);
+    }
+
+    /*
+     * @notice
      *  Getter function for the ySwap trade factory
      * @return address, current tradeFactory state variable
      */
