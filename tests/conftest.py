@@ -1,6 +1,6 @@
 import pytest
 from brownie import config
-from brownie import Contract, interface, NotionalLpLib
+from brownie import Contract, interface
 from utils import utils
 
 # Function scoped isolation fixture to enable xdist.
@@ -124,10 +124,10 @@ token_addresses = {
 # TODO: uncomment those tokens you want to test as want
 @pytest.fixture(
     params=[
-        # 'WBTC', # WBTC
-        "WETH",  # WETH
-        'DAI', # DAI
-        'USDC', # USDC
+        'WBTC', # WBTC
+        # "WETH",  # WETH
+        # 'DAI', # DAI
+        # 'USDC', # USDC
     ],
     scope="session",
     autouse=True,
