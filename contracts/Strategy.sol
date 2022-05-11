@@ -52,8 +52,6 @@ contract Strategy is BaseStrategy {
     using Address for address;
     using SafeMath for uint256;
 
-    // NotionalContract: proxy that points to a router with different implementations depending on function 
-    NotionalProxy public notionalProxy;
     // NOTE token for rewards
     IERC20 private noteToken;
     // Address of the nToken we interact with
@@ -66,22 +64,22 @@ contract Strategy is BaseStrategy {
     bytes32 private poolId;
     // ID of the asset being lent in Notional
     uint16 private currencyID;
-    // minimum amount of want to act on
-    uint256 private minAmountWant;
     // Initialize Sushi router interface to quote WETH for want
     ISushiRouter private constant quoter = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
     // Initialize WETH interface
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     // ETH currency ID
     uint16 private constant ETH_CURRENCY_ID = 1;
-    // To control when rewards are claimed 
-    bool private shouldClaimRewards;
-    // For cloning purposes
-    bool private isOriginal = true;
-    // To control whether migrations try to get positions out of notional
-    bool private forceMigration;
     // ySwap trade factory
     address private tradeFactory = address(0);
+    // To control whether migrations try to get positions out of notional
+    bool private forceMigration;
+    // To control when rewards are claimed 
+    bool public shouldClaimRewards;
+    // For cloning purposes
+    bool public isOriginal = true;
+    // NotionalContract: proxy that points to a router with different implementations depending on function 
+    NotionalProxy public notionalProxy;
     // EVENTS
     event Cloned(address indexed clone);
 
@@ -257,47 +255,11 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
-     *  Getter function for the toggle defining whether to swap rewards or not
-     * @return bool, current shouldClaimRewards state variable
-     */
-    function getShouldClaimRewards() external view returns(bool) {
-        return shouldClaimRewards;
-    }
-
-    /*
-     * @notice
-     *  Getter function for the state variable defining the original strategy
-     * @return bool, current isOriginal state variable
-     */
-    function getIsOriginal() external view returns(bool) {
-        return isOriginal;
-    }
-
-    /*
-     * @notice
-     *  Getter function for the address of the nToken to use
-     * @return address, current nToken state variable
-     */
-    function getNTokenAddress() external view returns(address) {
-        return address(nToken);
-    }
-
-    /*
-     * @notice
      *  Getter function for the ySwap trade factory
      * @return address, current tradeFactory state variable
      */
     function getTradeFactory() external view returns(address) {
         return tradeFactory;
-    }
-
-    /*
-     * @notice
-     *  Getter function for the current minimum amount of want required to enter a position
-     * @return uint256, current minAmountWant state variable
-     */
-    function getMinAmountWant() external view returns(uint256) {
-        return minAmountWant;
     }
 
     /*
@@ -327,15 +289,6 @@ contract Strategy is BaseStrategy {
      */
     function setShouldClaimRewards(bool _newToggle) external onlyVaultManagers {
         shouldClaimRewards = _newToggle;
-    }
-
-    /*
-     * @notice
-     *  Setter function for the minimum amount of want to invest, accesible only to vault managers
-     * @param _newMinAmount, new minimum amount of want to invest
-     */
-    function setMinAmountWant(uint256 _newMinAmount) external onlyVaultManagers {
-        minAmountWant = _newMinAmount;
     }
 
     /*
@@ -457,12 +410,8 @@ contract Strategy is BaseStrategy {
      * as it's the primary exchange venue for NOTE (only a NOTE / WETH pool available)
      */
     function swapToWETHManually() external onlyVaultManagers {
-        _claimRewards();
         uint256 _incentives = noteToken.balanceOf(address(this));
-
-        if (_incentives > 0) {
-            // Create the NOTE/WETH swap object for balancer
-            IBalancerVault.SingleSwap memory swap = IBalancerVault.SingleSwap(
+        IBalancerVault.SingleSwap memory swap = IBalancerVault.SingleSwap(
                 poolId,
                 IBalancerVault.SwapKind.GIVEN_IN,
                 IAsset(address(noteToken)),
@@ -470,16 +419,15 @@ contract Strategy is BaseStrategy {
                 _incentives,
                 abi.encode(0)
             );
-            _checkAllowance(address(balancerVault), noteToken, _incentives);
+        _checkAllowance(address(balancerVault), noteToken, _incentives);
              // Swap the NOTE tokens to WETH
-            balancerVault.swap(
-                swap, 
-                IBalancerVault.FundManagement(address(this), false, address(this), false),
-                _incentives, 
-                now
-                );
-            noteToken.safeApprove(address(balancerVault), 0);
-        }
+        balancerVault.swap(
+            swap, 
+            IBalancerVault.FundManagement(address(this), false, address(this), false),
+            _incentives, 
+            now
+            );
+        noteToken.safeApprove(address(balancerVault), 0);
     }
 
     /*
@@ -566,10 +514,6 @@ contract Strategy is BaseStrategy {
             return;
         }
         availableWantBalance = availableWantBalance.sub(_debtOutstanding);
-        // Check if we have the minimum required
-        if(availableWantBalance < minAmountWant) {
-            return;
-        }
         
         if (currencyID == ETH_CURRENCY_ID) {
             // Only necessary for wETH/ ETH pair
@@ -717,6 +661,44 @@ contract Strategy is BaseStrategy {
 
     /*
      * @notice
+     *  Used when the nTokens cannot be redeemed without accepting residual positions (very 
+     * small borrow positions that couldn't) be sold. This scenario is very unlikley but still,
+     * in order to get back all tokens we implement an external function for vault managers to
+     * perform a small lending action to offset the small borrow position as soon as market 
+     * rates allow for it
+     * @param amount, amount to lend - won't be blocked in Notional as it's only used monentarily 
+     * to create the offsetting lending position
+     * @param fCashAmount fCashAmount needed to offset the residual position
+     * @param marketIndex Market index of the residual position
+     */
+    function lendAmountManually(
+        uint256 amount,
+        uint256 fCashAmount,
+        uint256 marketIndex
+    ) external onlyVaultManagers {
+        if (currencyID == ETH_CURRENCY_ID) {
+            // Only necessary for wETH/ ETH pair
+            weth.withdraw(amount);
+        } else {
+            _checkAllowance(address(notionalProxy), want, amount);
+        }
+
+        // Deposit all and offset the borrow position
+        NotionalLpLib.lendAmountManually(
+            notionalProxy,
+            currencyID, 
+            amount, 
+            fCashAmount,
+            marketIndex
+            );
+
+        if (currencyID != ETH_CURRENCY_ID) {
+            want.safeApprove(address(notionalProxy), 0);
+        }
+    }
+
+    /*
+     * @notice
      *  Withdraw asset cash in the strategy's account resulting of an nToken redeem during
      * an idioyncratic period
      * @param amountInternalPrecision asset cash to redeem (cTokens)
@@ -743,9 +725,7 @@ contract Strategy is BaseStrategy {
      */
     function liquidateAllPositions() internal override returns (uint256) {
         if (shouldClaimRewards) {
-            if(notionalProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
-                _claimRewards();
-            }
+            _claimRewards();
         }
         
         executeBalanceAction(
@@ -771,9 +751,7 @@ contract Strategy is BaseStrategy {
      */
     function prepareMigration(address _newStrategy) internal override {
         if (shouldClaimRewards) {
-            if(notionalProxy.nTokenGetClaimableIncentives(address(this), block.timestamp) > 0) {
-                _claimRewards();
-            }
+            _claimRewards();
         }
 
         if(!forceMigration) {

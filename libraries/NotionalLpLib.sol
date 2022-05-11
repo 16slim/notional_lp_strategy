@@ -23,6 +23,8 @@ library NotionalLpLib {
     uint256 private constant MAX_BPS = 10_000;
     IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     uint256 private constant WETH_DECIMALS = 1e18;
+    uint8 private constant TRADE_TYPE_LEND = 0;
+    uint16 private constant ETH_CURRENCY_ID = 1;
 
     struct NTokenTotalValueFromPortfolioVars {
         address _strategy;
@@ -283,6 +285,73 @@ library NotionalLpLib {
         ) = notionalProxy.getCurrencyAndRates(currencyID);
             
         return amount.mul(uint256(underlyingToken.decimals)).div(uint256(ethRate.rate));
+    }
+
+    /*
+     * @notice
+     *  External function used to offset a residual borrowing position
+     * @param _notionalProxy, Notional Proxy contract
+     * @param _currencyID, ID of token involved
+     * @param _amount, Amount to lend
+     * @param _fCashAmount, fCash amount needed to offset the residual position
+     * @param _marketIndex, market index of the residual position
+     * @param _ETH_CURRENCY_ID, ID of ETH as tx changes a little
+     * @return bytes32 result, the encoded trade ready to be used in Notional's 'BatchTradeAction'
+     */
+    function lendAmountManually (
+        NotionalProxy _notionalProxy,
+        uint16 _currencyID,
+        uint256 _amount,
+        uint256 _fCashAmount,
+        uint256 _marketIndex
+    ) external {
+        BalanceActionWithTrades[] memory _actions = new BalanceActionWithTrades[](1);
+        
+        bytes32[] memory _trades = new bytes32[](1);
+        _trades[0] = getTradeFrom(TRADE_TYPE_LEND, _marketIndex, _fCashAmount);
+
+        _actions[0] = BalanceActionWithTrades(
+            DepositActionType.DepositUnderlying,
+            _currencyID,
+            _amount,
+            0, 
+            true,
+            true,
+            _trades
+        );
+
+        if (_currencyID == ETH_CURRENCY_ID) {
+            _notionalProxy.batchBalanceAndTradeAction{value: _amount}(address(this), _actions);
+            weth.deposit{value: address(this).balance}();
+        } else {
+            _notionalProxy.batchBalanceAndTradeAction(address(this), _actions);
+        }
+    }
+
+    /*
+     * @notice
+     *  Internal function encoding a trade parameter into a bytes32 variable needed for Notional
+     * @param _tradeType, Identification of the trade to perform, following the Notional classification in enum 'TradeActionType'
+     * @param _marketIndex, Market index in which to trade into
+     * @param _amount, fCash amount to trade
+     * @return bytes32 result, the encoded trade ready to be used in Notional's 'BatchTradeAction'
+     */
+    function getTradeFrom(uint8 _tradeType, uint256 _marketIndex, uint256 _amount) internal returns (bytes32 result) {
+        uint8 tradeType = uint8(_tradeType);
+        uint8 marketIndex = uint8(_marketIndex);
+        uint88 fCashAmount = uint88(_amount);
+        uint32 minSlippage = uint32(0);
+        uint120 padding = uint120(0);
+
+        // We create result of trade in a bitmap packed encoded bytes32
+        // (unpacking of the trade in Notional happens here: 
+        // https://github.com/notional-finance/contracts-v2/blob/master/contracts/external/actions/TradingAction.sol#L322)
+        result = bytes32(uint(tradeType)) << 248;
+        result |= bytes32(uint(marketIndex) << 240);
+        result |= bytes32(uint(fCashAmount) << 152);
+        result |= bytes32(uint(minSlippage) << 120);
+
+        return result;
     }
 
 }
