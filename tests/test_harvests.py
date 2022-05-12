@@ -6,7 +6,7 @@ import pytest
 def test_profitable_harvest(
     chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
     n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, 
-    million_in_token, note_token
+    million_in_token, note_token, sushiswap_router, weth
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
@@ -14,7 +14,7 @@ def test_profitable_harvest(
     # Harvest 1: Send funds through the strategy
     chain.sleep(1)
     strategy.harvest({"from": strategist})
-
+    vault.updateStrategyMaxDebtPerHarvest(strategy, 0, {"from":gov})
     amount_invested = vault.strategies(strategy)["totalDebt"]
 
     account = n_proxy_views.getAccount(strategy)
@@ -29,6 +29,7 @@ def test_profitable_harvest(
 
     chain.mine(1, timedelta=int((first_settlement-chain.time()) / 3))
     assert strategy.estimatedTotalAssets() > amount_invested
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     strategy.setDoHealthCheck(False, {"from": gov})
     tx = strategy.harvest({"from": strategist})
     
@@ -38,6 +39,7 @@ def test_profitable_harvest(
 
     chain.mine(1, timedelta=int((first_settlement-chain.time()) / 3))
     strategy.setDoHealthCheck(False, {"from": gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": strategist})
     
     assert tx.events["Harvested"]["profit"] > 0
@@ -52,6 +54,7 @@ def test_profitable_harvest(
     
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx2 = strategy.harvest({"from": gov})
 
     account = n_proxy_views.getAccount(strategy)
@@ -68,7 +71,8 @@ def test_profitable_harvest(
 def test_lossy_harvest(
     chain, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
     n_proxy_views, n_proxy_batch, token_whale, currencyID,
-    n_proxy_implementation, gov, million_fcash_notation, balance_threshold
+    n_proxy_implementation, gov, million_fcash_notation, balance_threshold,
+    sushiswap_router, weth
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
@@ -89,7 +93,7 @@ def test_lossy_harvest(
             symbol_collateral = "DAI"
         # Create impermanent loss by borrowing 10 million
         i = 1
-        while (i <= 10):
+        while (i <= 5):
             print("Whale borrowing million ", i)
             actions.borrow_1m_whales(n_proxy_implementation, currencyID, 
                 utils.get_token(symbol_collateral), n_proxy_batch, 
@@ -110,6 +114,7 @@ def test_lossy_harvest(
     
     vault.updateStrategyDebtRatio(strategy, 0, {"from":vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": strategist})
     assert tx.events["Harvested"]["profit"] == 0
     assert tx.events["Harvested"]["loss"] > 0
@@ -126,7 +131,8 @@ def test_lossy_harvest(
 def test_choppy_harvest(
     chain, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
     n_proxy_views, n_proxy_batch, token_whale, currencyID,note_token,note_whale,
-    n_proxy_implementation, gov, million_fcash_notation, balance_threshold
+    n_proxy_implementation, gov, million_fcash_notation, balance_threshold,
+    sushiswap_router, weth
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
@@ -170,6 +176,7 @@ def test_choppy_harvest(
          / (vault.strategies(strategy)["totalDebt"] - want_balance)
     assert loss_amount > 0
     strategy.setDoHealthCheck(False, {"from": gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": strategist})
     assert tx.events["Harvested"]["profit"] == 0
     assert tx.events["Harvested"]["loss"] > 0
@@ -212,6 +219,7 @@ def test_choppy_harvest(
 
     vault.updateStrategyDebtRatio(strategy, 0, {"from":vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": strategist})
     # checks.check_harvest_profit(tx, profit, RELATIVE_APPROX)
 

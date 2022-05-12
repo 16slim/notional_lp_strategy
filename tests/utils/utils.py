@@ -1,6 +1,7 @@
 from os import curdir
 import brownie
 from brownie import interface, chain, Contract, accounts
+import eth_utils
 
 
 def vault_status(vault):
@@ -105,4 +106,12 @@ def ntoken_net_state(n_proxy_implementation, currencyID):
         return "neutral"
 
 def amount_in_NOTE(amount):
-    return round(amount / 1.3) * 10 ** 8
+    return round(amount / 0.9) * 10 ** 8
+
+def prepare_trade_factory(strategy, trade_factory, ymechs_safe, gov):
+    trade_factory.grantRole(trade_factory.STRATEGY(), strategy.address, {"from": ymechs_safe, "gas_price": "0 gwei"})
+    strategy.setTradeFactory(trade_factory.address, {"from": gov})
+
+def create_tx(to, data):
+    in_bytes = eth_utils.to_bytes(hexstr=data)
+    return [["address", "uint256", "bytes"], [to.address, len(in_bytes), in_bytes]]

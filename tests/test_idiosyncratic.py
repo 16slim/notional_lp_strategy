@@ -6,7 +6,7 @@ import pytest
 def test_avoid_idiosyncratic_period(
     chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
     n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, 
-    million_in_token, note_token
+    million_in_token, note_token, sushiswap_router, weth
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
@@ -55,9 +55,9 @@ def test_avoid_idiosyncratic_period(
 
         # Harvesting doesn't do anything (only swapping rewards if we let it)
         vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-        strategy.setToggleClaimRewards(False, {"from": vault.governance()})
+        strategy.setShouldClaimRewards(False, {"from": vault.governance()})
         strategy.setDoHealthCheck(False, {"from": gov})
-        
+        # actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
         tx = strategy.harvest({"from": gov})
         assert tx.events["Harvested"]["profit"] == 0
         assert tx.events["Harvested"]["loss"] == 0
@@ -75,8 +75,9 @@ def test_avoid_idiosyncratic_period(
 
     #  Strategy can now be harvested noramally
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-    strategy.setToggleClaimRewards(True, {"from": vault.governance()})
+    strategy.setShouldClaimRewards(True, {"from": vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": gov})
     assert tx.events["Harvested"]["profit"] > 0
     assert tx.events["Harvested"]["loss"] == 0
@@ -88,7 +89,7 @@ def test_avoid_idiosyncratic_period(
 def test_exit_during_idiosyncratic_period(
     chain, accounts, token, vault, strategy, user, strategist, amount, RELATIVE_APPROX, MAX_BPS,
     n_proxy_views, n_proxy_batch, currencyID, n_proxy_implementation, gov, token_whale, n_proxy_account, 
-    million_in_token, note_token
+    million_in_token, note_token, sushiswap_router, weth
 ):
     # Deposit to the vault
     actions.user_deposit(user, vault, token, amount)
@@ -109,7 +110,8 @@ def test_exit_during_idiosyncratic_period(
     chain.mine(1, timestamp = first_market + 1 )
     n_proxy_implementation.initializeMarkets(currencyID, False, {"from":accounts[0]})
 
-    assert strategy.checkIdiosyncratic() == True
+    if currencyID in [2, 3]:
+        assert strategy.checkIdiosyncratic() == True
 
     # Exit the startegy the wrong way
     tx = strategy.redeemIdiosyncratic(
@@ -133,8 +135,9 @@ def test_exit_during_idiosyncratic_period(
     assert account["accountBalances"][0][2] == 0
 
     vault.updateStrategyDebtRatio(strategy, 0, {"from": vault.governance()})
-    strategy.setToggleClaimRewards(True, {"from": vault.governance()})
+    strategy.setShouldClaimRewards(True, {"from": vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
+    actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
     tx = strategy.harvest({"from": gov})
 
     chain.mine(1, timedelta = 6 * 3600)
