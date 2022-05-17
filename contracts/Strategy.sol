@@ -64,16 +64,20 @@ contract Strategy is BaseStrategy {
     bytes32 private poolId;
     // ID of the asset being lent in Notional
     uint16 private currencyID;
-    // Initialize Sushi router interface to quote WETH for want
-    ISushiRouter private constant quoter = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
-    // Initialize WETH interface
-    IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    // Only allow withdrawals with this expected max loss value
+    uint256 private slippageLiquidatePosition;
     // ETH currency ID
     uint16 private constant ETH_CURRENCY_ID = 1;
     // ySwap trade factory
     address private tradeFactory = address(0);
     // To control whether migrations try to get positions out of notional
     bool private forceMigration;
+    // Initialize Sushi router interface to quote WETH for want
+    ISushiRouter private constant quoter = ISushiRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+    // Initialize WETH interface
+    IWETH private constant weth = IWETH(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    // For % calculations
+    uint256 private constant MAX_BPS = 10_000;
     // To control when rewards are claimed 
     bool public shouldClaimRewards;
     // For cloning purposes
@@ -155,23 +159,8 @@ contract Strategy is BaseStrategy {
         currencyID = _currencyID;
         notionalProxy = _notionalProxy;
 
-        (Token memory assetToken, Token memory underlying) = _notionalProxy.getCurrency(_currencyID);
-        
-        // By default not claim rewards
-        shouldClaimRewards = false;
-
         // Initialize NOTE token and nToken
         _updateNotionalAddresses();
-
-        // By default try to get positions out of Notional
-        forceMigration = false;
-
-        // Check whether the currency is set up right
-        if (_currencyID == ETH_CURRENCY_ID) {
-            require(address(0) == underlying.tokenAddress); 
-        } else {
-            require(address(want) == underlying.tokenAddress);
-        }
 
         // Balancer setup
         balancerVault = IBalancerVault(_balancerVault);
@@ -339,6 +328,15 @@ contract Strategy is BaseStrategy {
     function getRewardsValue() external view returns (uint256) {
         return _getRewardsValue();
     }
+    
+    /*
+     * @notice
+     *  Getter function for the current value of max slippage factor allowed
+     * @return uint256, current value of slippageLiquidatePosition
+     */
+    function getSlippageLiquidatePosition() external view returns (uint256) {
+        return slippageLiquidatePosition;
+    }
 
     /*
      * @notice
@@ -357,6 +355,15 @@ contract Strategy is BaseStrategy {
     function setBalancerPool(bytes32 _newPoolId) external onlyVaultManagers {
         (address balancerPoolAddress,) = balancerVault.getPool(_newPoolId);
         balancerPool = IBalancerPool(balancerPoolAddress);
+    }
+
+    /*
+     * @notice
+     *  Setter function for the max slippage allowed liquidating a position
+     * @param _newFactor, new slippage factor to use
+     */
+    function setSlippage(uint256 _newFactor) external onlyVaultManagers {
+        slippageLiquidatePosition = _newFactor;
     }
 
     /*
@@ -616,7 +623,7 @@ contract Strategy is BaseStrategy {
             }
             // We launch the balance action with RedeemNtoken type and the previously calculated amount of tokens
             executeBalanceAction(
-                DepositActionType.RedeemNToken, 
+                DepositActionType.RedeemNToken,
                 tokensToRedeem
             );
         }
@@ -625,8 +632,12 @@ contract Strategy is BaseStrategy {
         uint256 totalLooseWant = balanceOfWant();
         _liquidatedAmount = Math.min(totalLooseWant, _amountNeeded);
         if (_amountNeeded > totalLooseWant) {
-            // _loss should be equal to lossesToBeRealised ! 
-            _loss = _amountNeeded.sub(totalLooseWant);   
+            // _loss should be equal to lossesToBeRealised !
+            _loss = _amountNeeded.sub(totalLooseWant);
+            // We check that the reported loss is <= (1+slippage) * lossesToBeRealised
+            // and >= (1-slippage) * lossesToBeRealised
+            require(_loss <= lossesToBeRealised.mul(MAX_BPS.add(slippageLiquidatePosition)).div(MAX_BPS));
+            require(_loss >= lossesToBeRealised.mul(MAX_BPS.sub(slippageLiquidatePosition)).div(MAX_BPS));
         }
 
     }
