@@ -1,6 +1,7 @@
 from datetime import timedelta
 from utils import actions, checks, utils
 import pytest
+from brownie import Contract
 
 # tests migrating a strategy manually
 def test_force_migration(
@@ -14,6 +15,7 @@ def test_force_migration(
     # Harvest 1: Send funds through the strategy
     chain.sleep(1)
     strategy.harvest({"from": strategist})
+    n_token = Contract(strategy.getNTokenAddress())
 
     amount_invested = vault.strategies(strategy)["totalDebt"]
 
@@ -28,9 +30,14 @@ def test_force_migration(
     assert note_token.balanceOf(strategy) == 0
     strategy.manuallyClaimRewards({"from": gov})
     assert note_token.balanceOf(strategy) > 0
-    strategy.manuallyTransferNTokens(new_strategy, amount_tokens, {"from": gov})
+    assert 0
+    # Manually transfer nTokens
+    strategy.sweep(n_token.address, {"from":gov})
+    n_token.transfer(new_strategy, amount_tokens, {"from":gov})
+    # Manually transfer NOTE
     note_balance = note_token.balanceOf(strategy)
-    strategy.transferNOTETokensManually(new_strategy, note_balance, {"from":gov})
+    strategy.sweep(note_token.address, {"from":gov})
+    note_token.transfer(new_strategy, note_balance, {"from":gov})
     
     # no more rewards in the strat
     assert strategy.getRewardsValue() == 0
