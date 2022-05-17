@@ -765,49 +765,9 @@ contract Strategy is BaseStrategy {
 
         if(!forceMigration) {
             // Transfer nTokens and NOTE incentives (may be necessary to claim them)
-            _transferNTokens(_newStrategy, nToken.balanceOf(address(this)));
-            _transferNOTETokens(_newStrategy, noteToken.balanceOf(address(this)));
+            nToken.transfer(_newStrategy, nToken.balanceOf(address(this)));
+            noteToken.transfer(_newStrategy, noteToken.balanceOf(address(this)));
         }
-    }
-
-    /*
-     * @notice
-     *  Exernal function used to manually migrate nTokens tokens to a new strategy
-     * @param newStrategy address where the contract of the new strategy is located
-     * @param amount number of nTokens to migrate
-     */
-    function manuallyTransferNTokens(address newStrategy, uint256 amount) external onlyGovernance {
-        _transferNTokens(newStrategy, amount);
-    }
-
-    /*
-     * @notice
-     *  Internal function used to migrate nTokens tokens to a new strategy
-     * @param _to address where the contract of the new strategy is located
-     * @param _amount number of nTokens to migrate
-     */
-    function _transferNTokens(address _to, uint256 _amount) internal {
-        nToken.transfer(_to, _amount);
-    }
-
-    /*
-     * @notice
-     *  Internal function used to migrate NOTE tokens to a new strategy
-     * @param _to address where the contract of the new strategy is located
-     * @param _amount number of NOTE to migrate
-     */
-    function _transferNOTETokens(address _to, uint256 _amount) internal {
-        noteToken.transfer(_to, _amount);
-    }
-
-    /*
-     * @notice
-     *  External function used to migrate NOTE tokens to a new strategy
-     * @param newStrategy address where the contract of the new strategy is located
-     * @param amount number of NOTE to migrate
-     */
-    function transferNOTETokensManually (address newStrategy, uint256 amount) external onlyGovernance {
-        _transferNOTETokens(newStrategy, amount);
     }
 
     /*
