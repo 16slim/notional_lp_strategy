@@ -1,6 +1,7 @@
 from datetime import timedelta
 from utils import actions, checks, utils
 import pytest
+from brownie import reverts
 
 # tests harvesting a strategy that returns profits correctly
 def test_profitable_harvest(
@@ -111,11 +112,14 @@ def test_lossy_harvest(
     loss = amount_invested - final_value
     
     assert loss > 0
-    
+
     vault.updateStrategyDebtRatio(strategy, 0, {"from":vault.governance()})
     strategy.setDoHealthCheck(False, {"from": gov})
     actions.sell_rewards_to_want(sushiswap_router, token, weth, strategy, gov, currencyID)
+    
+    strategy.setSlippage(100, {"from": gov})
     tx = strategy.harvest({"from": strategist})
+        
     assert tx.events["Harvested"]["profit"] == 0
     assert tx.events["Harvested"]["loss"] > 0
     assert tx.events["Harvested"]["debtPayment"] > 0

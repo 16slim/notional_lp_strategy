@@ -30,7 +30,7 @@ def test_force_migration(
     assert note_token.balanceOf(strategy) == 0
     strategy.manuallyClaimRewards({"from": gov})
     assert note_token.balanceOf(strategy) > 0
-    assert 0
+
     # Manually transfer nTokens
     strategy.sweep(n_token.address, {"from":gov})
     n_token.transfer(new_strategy, amount_tokens, {"from":gov})
@@ -64,6 +64,7 @@ def test_force_migration(
     new_strategy.setDoHealthCheck(False, {"from": gov})
     new_strategy.setShouldClaimRewards(True, {"from":gov})
     actions.sell_rewards_to_want(sushiswap_router, token, weth, new_strategy, gov, currencyID)
+    new_strategy.setSlippage(100, {"from": gov})
     new_strategy.harvest({"from":gov})
 
     assert new_strategy.estimatedTotalAssets() == new_strategy.getRewardsValue()
