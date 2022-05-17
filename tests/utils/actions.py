@@ -142,7 +142,7 @@ def airdrop_amount_rewards(strategy, amount, note_token, note_whale):
 
 def sell_rewards_to_want(router, want, weth, strategy, gov, currencyID):
     strategy.manuallyClaimRewards({"from": gov})
-    strategy.swapToWETHManually({"from": gov})
+    strategy.swapToWETHManually(0, {"from": gov})
     amount_in = weth.balanceOf(strategy)
     if currencyID > 1 and amount_in > 0:
         weth.approve(router, 2**255-1, {"from":strategy})

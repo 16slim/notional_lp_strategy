@@ -21,7 +21,7 @@ def test_yswap_profitable_harvest(
     # Close the entire position
     strategy.redeemNTokenAmount(n_proxy_implementation.getAccount(strategy)[1][0][2], {"from": gov})
     print(f"Strategy total assets: {strategy.estimatedTotalAssets()}")
-    strategy.swapToWETHManually({"from": gov})
+    strategy.swapToWETHManually(0, {"from": gov})
     
     if token != weth:
 
