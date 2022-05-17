@@ -425,7 +425,7 @@ contract Strategy is BaseStrategy {
      *  Function claiming the pending rewards for the strategy (if any), swap them to WETH in balancer
      * as it's the primary exchange venue for NOTE (only a NOTE / WETH pool available)
      */
-    function swapToWETHManually() external onlyVaultManagers {
+    function swapToWETHManually(uint256 minimumOut) external onlyVaultManagers {
         uint256 _incentives = noteToken.balanceOf(address(this));
         IBalancerVault.SingleSwap memory swap = IBalancerVault.SingleSwap(
                 poolId,
@@ -436,11 +436,11 @@ contract Strategy is BaseStrategy {
                 abi.encode(0)
             );
         _checkAllowance(address(balancerVault), noteToken, _incentives);
-             // Swap the NOTE tokens to WETH
+        // Swap the NOTE tokens to WETH
         balancerVault.swap(
             swap, 
             IBalancerVault.FundManagement(address(this), false, address(this), false),
-            _incentives, 
+            minimumOut, 
             now
             );
         noteToken.safeApprove(address(balancerVault), 0);
