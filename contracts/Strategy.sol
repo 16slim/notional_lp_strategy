@@ -622,11 +622,11 @@ contract Strategy is BaseStrategy {
         }
 
         // Assess result 
-        uint256 totalAssets = balanceOfWant();
-        _liquidatedAmount = Math.min(totalAssets, _amountNeeded);
-        if (_amountNeeded > totalAssets) {
+        uint256 totalLooseWant = balanceOfWant();
+        _liquidatedAmount = Math.min(totalLooseWant, _amountNeeded);
+        if (_amountNeeded > totalLooseWant) {
             // _loss should be equal to lossesToBeRealised ! 
-            _loss = _amountNeeded.sub(totalAssets);   
+            _loss = _amountNeeded.sub(totalLooseWant);   
         }
 
     }
