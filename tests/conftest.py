@@ -124,9 +124,9 @@ token_addresses = {
 # TODO: uncomment those tokens you want to test as want
 @pytest.fixture(
     params=[
-        'WBTC', # WBTC
+        # 'WBTC', # WBTC
         # "WETH",  # WETH
-        # 'DAI', # DAI
+        'DAI', # DAI
         # 'USDC', # USDC
     ],
     scope="session",
@@ -144,9 +144,9 @@ currency_IDs = {
 
 thresholds = {
     "WETH": (1000e18, -500e8),
-    "DAI": (20e24, -20e14),
+    "DAI": (20e24, -2e14),
     "WBTC": (50e8, -50e8),
-    "USDC": (20e12, -20e14),
+    "USDC": (20e12, -2e14),
 }
 
 @pytest.fixture
@@ -264,6 +264,7 @@ def strategy(strategist, keeper, vault, rewards, Strategy, gov, \
     vault.revokeStrategy(strategy)
     vault.addStrategy(cloned_strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
 
+    cloned_strategy.setSlippage(100, {"from": gov}) # 1%
     cloned_strategy.setShouldClaimRewards(True, {"from": gov})
     cloned_strategy.setDoHealthCheck(False, {"from": gov})
 
