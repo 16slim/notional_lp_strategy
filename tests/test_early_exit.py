@@ -35,8 +35,10 @@ def test_user_early_exit(
     
     slippage = 110
     strategy.setSlippage(slippage, {"from":gov}) # 1.1%
+    prev_pps = vault.pricePerShare()
     tx = vault.withdraw(int(amount/2), user, 1e4, {"from":user})
 
+    assert prev_pps == vault.pricePerShare()
     withdrawn = token.balanceOf(user)
     lost = vault.strategies(strategy)["totalLoss"]
     
