@@ -597,7 +597,11 @@ contract Strategy is BaseStrategy {
         
         // The strategy will only realise losses proportional to the amount we are liquidating
         uint256 totalDebt = vault.strategies(address(this)).totalDebt;
-        uint256 lossesToBeRealised = unrealisedLosses.mul(amountToLiquidate).div(totalDebt.sub(wantBalance));
+        uint256 lossesToBeRealised = 0;
+        // If debt is already in want balance we don't calculate losses
+        if(totalDebt > wantBalance) {
+            lossesToBeRealised = unrealisedLosses.mul(amountToLiquidate).div(totalDebt.sub(wantBalance));
+        }
 
         // Due to how Notional works, we need to substract losses from the amount to liquidate
         // If we don't do this and withdraw a small enough % of position, we will not incur in losses,
