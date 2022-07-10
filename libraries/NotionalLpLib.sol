@@ -7,6 +7,7 @@ pragma experimental ABIEncoderV2;
 import "../interfaces/notional/NotionalProxy.sol";
 import "../interfaces/notional/nTokenERC20.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/SafeCast.sol";
 import "@openzeppelin/contracts/math/SignedSafeMath.sol";
 import {
     IERC20
@@ -79,7 +80,7 @@ library NotionalLpLib {
             MarketParameters[] memory _activeMarkets = NTokenVars._notionalProxy.getActiveMarkets(NTokenVars._currencyID);
             
             // Total number of nTokens available, used to calculate the share of the strategy
-            int256 totalSupply = int256(NTokenVars._notionalProxy.nTokenTotalSupply(NTokenVars._nTokenAddress));
+            int256 totalSupply = SafeCast.toInt256(NTokenVars._notionalProxy.nTokenTotalSupply(NTokenVars._nTokenAddress));
 
             // Iterate over all active markets and sum value of each position 
             int256 fCashClaim = 0;
@@ -120,7 +121,7 @@ library NotionalLpLib {
                         // 5. Convert the netfcash claim to cTokens
                         (int256 assetInternalNotation,) = NTokenVars._notionalProxy.getCashAmountGivenfCashAmount(
                             NTokenVars._currencyID,
-                            int88(-fCashClaim),
+                            toInt88(-fCashClaim),
                             mIndex,
                             block.timestamp
                         );
@@ -352,6 +353,17 @@ library NotionalLpLib {
         result |= bytes32(uint(minSlippage) << 120);
 
         return result;
+    }
+
+    /*
+     * @notice
+     *  Copy safe cast operation from OpenZeppelin for int88
+     * @param value, value to cast
+     * @return int88 result, the safely casted value
+     */
+    function toInt88(int256 value) internal pure returns (int88) {
+        require(value >= -2**87 && value < 2**87, "SafeCast: value doesn\'t fit in 88 bits");
+        return int88(value);
     }
 
 }
